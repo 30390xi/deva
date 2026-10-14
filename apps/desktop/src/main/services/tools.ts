@@ -144,7 +144,7 @@ export const toolSpecs: ToolSpec[] = [
       (process.platform === 'win32'
         ? '命令在 bash 中运行（优先使用 Git Bash，请写 POSIX/bash 命令；若本机未装 Git Bash 则回落到 cmd.exe，此时请改用 Windows 命令）。'
         : '命令在 bash/sh 中运行，请写 POSIX/bash 命令。') +
-      '工作目录：已挂载工作区时为项目根，未挂载时为用户主目录（需要别处执行请在命令里用绝对路径或自行 cd）。非交互运行（已禁用分页器/凭据提示/颜色，避免卡住）；默认超时 120000ms（可用 timeout 调整，最长 600000ms）；输出过长会被截断。命令不受任何限制、直接执行，破坏性操作（删除、覆盖、强推等）请先确认目标无误。请勿运行交互式或长驻命令（如 dev server、vim、npm init——需交互请让用户改用终端面板），否则会阻塞到超时后被强制结束。',
+      '工作目录：已挂载工作区时为项目根，未挂载时为用户主目录（需要别处执行请在命令里用绝对路径或自行 cd）。非交互运行（已禁用分页器/凭据提示/颜色，避免卡住）；默认超时 600000ms（可用 timeout 调整，最长 1800000ms）；输出过长会被截断。命令不受任何限制、直接执行，破坏性操作（删除、覆盖、强推等）请先确认目标无误。请勿运行交互式或长驻命令（如 dev server、vim、npm init——需交互请让用户改用终端面板），否则会阻塞到超时后被强制结束。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -155,7 +155,7 @@ export const toolSpecs: ToolSpec[] = [
         },
         timeout: {
           type: 'integer',
-          description: '超时毫秒数（可选，默认 120000，最长 600000）。'
+          description: '超时毫秒数（可选，默认 600000，最长 1800000）。'
         }
       },
       required: ['command']
@@ -594,8 +594,8 @@ const WEB_FETCH_MAX_BYTES = 5 * 1024 * 1024
 const WEB_TEXT_MAX = 100_000
 /** run_command 护栏：输出字符上限 / 默认与最长超时 / 捕获字节上限（防暴产出）。 */
 const EXEC_OUTPUT_MAX = 30_000
-const EXEC_TIMEOUT_DEFAULT = 120_000
-const EXEC_TIMEOUT_MAX = 600_000
+const EXEC_TIMEOUT_DEFAULT = 600_000
+const EXEC_TIMEOUT_MAX = 1_800_000
 const EXEC_CAPTURE_BYTES = 4 * EXEC_OUTPUT_MAX
 /** 杀树后等 stdio 关闭的宽限期；须短于退出时 settleActiveTurns 的 3s 收尾窗口。 */
 const EXEC_KILL_GRACE_MS = 2000
