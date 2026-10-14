@@ -69,7 +69,7 @@ export function useViewport(): { w: number; h: number } {
 }
 
 /**
- * 拖拽手柄。axis=x：向右拖变大；axis=y：向上拖变大（手柄在输入区顶边）。
+ * 拖拽手柄。axis=x：向右拖变大；axis=y：向上拖变大（手柄在输入框上边框）。
  * 拖动中每帧回调 onChange（调用方负责夹取），松手 onCommit 落盘；双击 onReset 恢复默认。
  * 用 pointer capture：拖出手柄 / 越过 iframe 等元素也不会丢失事件。
  */

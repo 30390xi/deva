@@ -1215,6 +1215,60 @@ textarea {
   color: var(--fg-subtle);
 }
 
+/* 待办清单条目（「已完成清单」卡与输入框上方的清单面板共用）：已完成打勾划线、进行中高亮、待办空心圈。 */
+.todo-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.todo-item__mark {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-subtle);
+}
+.todo-item.is-in_progress .todo-item__mark {
+  color: var(--accent);
+}
+.todo-item.is-completed .todo-item__mark {
+  width: 13px;
+  height: 13px;
+  margin: 3px 1px 0;
+  border-radius: var(--radius-full);
+  background: var(--success);
+  color: #fff;
+}
+.todo-item__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.todo-item.is-in_progress .todo-item__text {
+  font-weight: 600;
+}
+.todo-item.is-completed .todo-item__text {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--fg-muted) 60%, transparent);
+}
+/* 已完成清单卡：复用子智能体折叠卡的骨架，标题图标改用完成色。 */
+.todocard .subagent__head-icon {
+  color: var(--success);
+}
+
 /* 角色名片（propose_agent 提议）：微信名片式紧凑卡。pending 可点，accepted/rejected 终态弱化。 */
 .agentcard {
   display: flex;

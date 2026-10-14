@@ -65,7 +65,7 @@
   left: 2px;
   width: 2px;
 }
-/* 输入框：横向热区，压在 .cf-composer 顶边框上。 */
+/* 输入框：横向热区，压在输入框（.cf-box）上边框上。 */
 .cf-resizer--y {
   left: 0;
   right: 0;
@@ -78,6 +78,15 @@
   right: 0;
   top: 2px;
   height: 2px;
+}
+/* 输入框上边框：热区以 1px 边框为中线；左右让开圆角，提示线只落在边框的直线段上。 */
+.cf-resizer--y.cf-resizer--box {
+  top: -4px;
+  left: var(--radius-lg);
+  right: var(--radius-lg);
+}
+.cf-resizer--box::after {
+  top: 3px;
 }
 /* 拖动中：全局光标保持、禁止选中文字（指针移出手柄也不闪回箭头、不误选消息）。 */
 body.cf-resizing-x,
@@ -1408,11 +1417,11 @@ body.cf-resizing-y * {
   white-space: pre-wrap;
 }
 
-/* 输入区 */
+/* 输入区。上方分隔线已去掉，但保留 1px 透明边框：边距与有分隔线时逐像素一致（有无待办胶囊都不变）。 */
 .cf-composer {
   position: relative;
   padding: var(--space-3) var(--space-4) var(--space-4);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid transparent;
 }
 /* 回到最新浮标：锚在输入区顶边正上方居中（bottom:100% 相对 .cf-composer）。 */
 .cf-jump {
@@ -1508,7 +1517,127 @@ body.cf-resizing-y * {
   font-size: 11px;
   color: var(--fg-subtle);
 }
+/* 待办清单进度胶囊：输入盒正上方、左对齐、随内容宽，最多一个（进行中的清单）；点开向上展开其条目（与输入盒同宽）。 */
+.cf-todo {
+  margin-bottom: var(--space-2);
+}
+.cf-todo__pill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: 30px;
+  padding: 0 10px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.cf-todo__pill:hover,
+.cf-todo.is-open .cf-todo__pill {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.cf-todo__now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-todo__now.is-doing {
+  color: var(--fg);
+}
+.cf-todo__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+.cf-todo__caret {
+  flex: none;
+  color: var(--fg-subtle);
+  transition: transform 0.15s ease;
+}
+.cf-todo.is-open .cf-todo__caret {
+  transform: rotate(180deg);
+}
+.cf-todo__ring {
+  flex: none;
+}
+.cf-todo__ring circle {
+  fill: none;
+  stroke-width: 2.2;
+}
+.cf-todo__ring-track {
+  stroke: var(--border-strong);
+}
+.cf-todo__ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.3s ease;
+}
+.cf-todo__panel {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin-bottom: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, 55vh);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.cf-todo__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.cf-todo__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.cf-todo__cancel {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cf-todo__cancel:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.cf-todo__cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cf-todo__scroll {
+  overflow-y: auto;
+  padding: var(--space-3);
+}
 .cf-box {
+  position: relative; /* 上边框拖拽手柄的定位锚 */
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);

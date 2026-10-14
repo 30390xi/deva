@@ -2,6 +2,7 @@ import { streamChat } from '../providers'
 import type { ContentPart, Message } from '../providers/types'
 import { getConfig } from './config'
 import { save as saveProject, type StoredSession } from './chat-store'
+import { todoSnapshotText } from './todos'
 
 /**
  * 上下文压缩（主进程）。
@@ -537,7 +538,12 @@ export async function compactSession(args: {
       : zh
         ? '以下是此前对话的摘要（为节省上下文，较早的消息已压缩）。请在此基础上继续。'
         : 'The following is a summary of the earlier conversation (older messages were compacted to save context). Continue from here.'
-  const summaryMsg: Message = { role: 'user', content: `${COMPACT_MARKER}\n${header}\n\n${summary}` }
+  // 未完成的当前待办清单附在摘要后：写它的 tool_use 可能刚被压掉，模型从此只能从这里知道清单进度。
+  const todo = todoSnapshotText(session.todos, session.todoCancelled, zh)
+  const summaryMsg: Message = {
+    role: 'user',
+    content: `${COMPACT_MARKER}\n${header}\n\n${summary}${todo ? `\n\n${todo}` : ''}`
+  }
   // 轮内切：本轮请求原样留在最前（附件一并保留），摘要紧随其后。两条 user 连着，发送前由
   // normalizeMessages 合并；摘要不算轮起点，故本轮在轮下标上仍是同一轮。
   const head = keepHead >= 0 ? [msgs[keepHead]] : []

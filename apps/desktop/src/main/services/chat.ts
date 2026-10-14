@@ -12,6 +12,7 @@ import {
   toolCategory,
   toolSpecs,
   buildPlanTool,
+  buildTodoTool,
   type ToolContext,
   type ToolResult
 } from './tools'
@@ -45,6 +46,17 @@ import { createTask, type CreateTaskResult } from './tasks'
 import type { TaskCreateInput, TaskRecord } from './tasks-types'
 import { dispatchMcpTool, getMcpToolSpecs } from './mcp'
 import { trustRoot } from './fs-guard'
+import {
+  activeTodoList,
+  applyTodoWrite,
+  todoReminderText,
+  todoResultText,
+  todoUserCancelNote,
+  todoState,
+  type TodoEntry,
+  type TodoItem,
+  type TodoState
+} from './todos'
 import {
   deriveTitle,
   ensureSession,
@@ -284,6 +296,11 @@ type DisplayBlock =
    * 回合解开删除（且重建卡用的是 toolUseId，本就与那把键不同名），此时若还画出按钮，点了必然石沉大海。
    */
   | { kind: 'plan'; id: string; plan: string; decision: 'approve' | 'keep' | 'cancelled' }
+  /**
+   * 已完成的待办清单卡：画在令清单全部完成的那次 todo_write 处，条目取自 todos 边车里该次写入的快照。
+   * 其余 todo_write 调用在对话流里不画（进度只在输入框上方的胶囊里显示）。
+   */
+  | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 
 export type DisplayMessage =
   | { role: 'user'; text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] }
@@ -310,6 +327,7 @@ function toDisplayMessages(
   summaries: Record<string, string> = {},
   plans: Record<string, { decision: 'approve' | 'keep' | null }> = {},
   autotasks: Record<string, { status: 'created' | 'dismissed'; taskId?: string }> = {},
+  todos: TodoEntry[] = [],
   /** 子智能体 id → 类型与任务标题（来自子智能体记录索引），给续聊卡补标题。 */
   subagentLookup?: (id: string) => { agent: string; description: string } | undefined
 ): DisplayMessage[] {
@@ -337,6 +355,7 @@ function toDisplayMessages(
   }
   const lookupSubagent = (id: string): { agent: string; description: string } | undefined =>
     subagentLookup?.(id) ?? subagentOrigins.get(id)
+  const todoById = new Map(todos.map((e) => [e.id, e]))
 
   // after → 该位置应插入的提示（一轮通常至多一条，用数组以防同位置多条）。
   const noticesAfter = new Map<number, StoredNotice[]>()
@@ -411,7 +430,11 @@ function toDisplayMessages(
                   ? 'keep'
                   : 'cancelled'
             })
-          else
+          else if (kind === 'todo_write') {
+            // 只有令清单全部完成的那次写入落成「已完成清单」卡；其余写入不画（进度在胶囊里）。
+            const e = todoById.get(p.id)
+            if (e?.done) blocks.push({ kind: 'todolist', id: p.id, title: e.title, items: e.items })
+          } else
             blocks.push({
               kind: 'tool',
               id: p.id,
@@ -559,6 +582,9 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
     s.summaries = {}
     s.plans = {}
     s.autotasks = {}
+    s.todos = []
+    s.todoCancelled = []
+    s.todoCancelNote = undefined
     // 检查点记录同样按 toolUseId 归属，随轮一并清空（lastKnown / baselines 描述的是磁盘现状，保留）。
     s.checkpoints = {}
     pruneSubagents(s.id, new Set())
@@ -567,6 +593,21 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
   }
 
   s.messages = old.filter((_, i) => !toDelete.has(i))
+
+  // 待办清单：删掉被删轮里那几次写入的快照，折叠结果即回到删轮前。不能像其余边车那样「只留存活
+  // tool_use」——被压缩掉的写入仍是清单现状，那样一删轮就把它们误清了。
+  if (s.todos?.length) {
+    const gone = new Set<string>()
+    for (const i of toDelete) {
+      const c = old[i].content
+      if (typeof c !== 'string') for (const p of c) if (p.type === 'tool_use') gone.add(p.id)
+    }
+    s.todos = s.todos.filter((e) => !gone.has(e.id))
+    if (s.todoCancelled?.length) {
+      const live = new Set(s.todos.map((e) => e.listId))
+      s.todoCancelled = s.todoCancelled.filter((x) => live.has(x))
+    }
+  }
 
   // 重锚 notices：after 语义 = 提示前方的消息条数（锚点消息下标 = after-1）。
   //  after=0（锚在最前）恒保留；锚点消息被删 → 丢弃该提示；否则新 after = 存活消息中「旧下标 < after」的条数。
@@ -853,6 +894,13 @@ export type ChatStreamEvent =
   /** 计划审阅：exit_plan 提交计划，暂停循环等用户批准（approve=批准后按计划执行 / keep=继续完善 / 取消）。 */
   | { type: 'plan_review'; key: string; plan: string }
   /**
+   * 待办清单的整体状态（会话级）：每次 todo_write 后、以及按轮删除 / 回滚 / 收起清单后推送。
+   * 后几种不属于任何回合，turnId 为空串。
+   */
+  | { type: 'todos'; state: TodoState }
+  /** 本次 todo_write 令清单全部完成：在对话流里落一张「已完成清单」卡（与重开时同形）。 */
+  | { type: 'todo_done'; id: string; title: string; items: TodoItem[] }
+  /**
    * 请求挂载工作区：本次工具调用缺相对路径基准（未挂载 + 写入类相对路径 / 扫描类省略 path），
    * 暂停循环等用户一键挂载。tool/path 仅供卡片说明「为什么需要」。**不是模型发起的工具**——
    * 由权限闸门前置判定生成（判据见 tools.needsWorkspaceMount），故模型既不占工具槽也无从滥用。
@@ -1106,6 +1154,8 @@ interface RewindUndo {
     summaries: StoredSession['summaries']
     plans: StoredSession['plans']
     autotasks: StoredSession['autotasks']
+    todos: StoredSession['todos']
+    todoCancelled: StoredSession['todoCancelled']
     checkpoints: Record<string, CheckpointRec[]> | undefined
     lastKnown: StoredSession['lastKnown']
     restoreNote: string | undefined
@@ -1221,7 +1271,8 @@ function systemPrompt(
     '【工程纪律】① 只做用户要求的事：不擅自加功能、不做没要求的重构或「顺手优化」，也不为不可能发生的情况堆防御代码；修 bug 就修 bug。② 改代码先读周边：贴合所在文件既有的命名、风格、惯用写法与注释密度，优先复用现有函数与工具，不另起炉灶。③ 如实汇报：改完能验证就验证（跑类型检查、测试或构建）；测试失败就说失败并给出关键输出，跳过了哪步就说跳过了，没验证过的不要说成「已完成、已通过」。④ 提到代码位置时用「路径:行号」的写法，方便用户定位。',
     `【执行与安全边界】写入/修改文件、执行命令都无需任何授权：直接调用对应工具即可，本应用没有授权弹框。文件读写与命令执行均不设任何限制（工作区外、主目录、隐藏目录、.git 均可直接读写，任何命令都会直接执行），删除、覆盖、强推等破坏性操作执行前请自行核对目标无误。切勿在回复文字里询问「是否允许写入 / 是否同意覆盖 / 请确认」之类的话：不存在授权界面，用户也无法用文字给你授权，这只会让任务白白停滞——需要用户拍板时用 ask_user。`,
     '【决策与澄清】当需求确有歧义、存在多个各有取舍的可行方案需用户抉择、或缺少无法合理默认的关键信息时，调用 ask_user 抛出一个或多个问题（每题可给候选项、可单选或多选，界面另有内置「自己输入」入口），用户在同一张卡片里一次性作答后回灌给你再继续；能合理默认就直接做，别为琐碎选择打断用户。注意区分：ask_user 只用于征求决策/澄清；写入与执行本就无需授权，切勿用它去问「是否允许写入/执行」。',
-    '【计划先行】遇到非平凡的实现类任务（新功能、跨多文件改动、有多个各有取舍的方案、或需求尚不明确等），先用只读工具（read_file / list_dir / glob / grep / web_fetch）充分调研理解现状——调研面较大时（要翻多个目录、追多条调用链、或需摸清一整套既有约定）可先用 `run_subagent` 派发 `Plan` 子智能体在隔离上下文里完成调研并带回方案要点，再由你综合判断——然后调用 `exit_plan` 提交一份面向用户批准的完整实施计划（Markdown）；**在计划获批前不要写入文件或执行命令**。用户批准后你直接按计划执行、无需再次征求授权；用户若选择继续完善，请依其反馈调整后再重新提交，在收到新反馈前不要重复调用 exit_plan。琐碎、单点、只读或答疑类任务直接做，不必先出计划。'
+    '【计划先行】遇到非平凡的实现类任务（新功能、跨多文件改动、有多个各有取舍的方案、或需求尚不明确等），先用只读工具（read_file / list_dir / glob / grep / web_fetch）充分调研理解现状——调研面较大时（要翻多个目录、追多条调用链、或需摸清一整套既有约定）可先用 `run_subagent` 派发 `Plan` 子智能体在隔离上下文里完成调研并带回方案要点，再由你综合判断——然后调用 `exit_plan` 提交一份面向用户批准的完整实施计划（Markdown）；**在计划获批前不要写入文件或执行命令**。用户批准后你直接按计划执行、无需再次征求授权；用户若选择继续完善，请依其反馈调整后再重新提交，在收到新反馈前不要重复调用 exit_plan。琐碎、单点、只读或答疑类任务直接做，不必先出计划。',
+    '【任务清单】执行需要 3 步及以上的任务时（尤其是计划获批后开始执行、或用户一次交代了多件事），先用 `todo_write` 列出待办清单，界面会在输入框上方以进度胶囊实时显示给用户；执行中持续更新：同一时刻只保留一项 in_progress，做完一项立即标为 completed，发现新步骤随时补进清单。每次调用传完整清单。任务被暂停、用户转向别的事而不再进行当前清单时，调用 todo_write 传 cancel: true 取消它。单步、琐碎或纯答疑的任务不要建清单。'
   ]
   if (skills.length) {
     // 渐进式披露：此处只列「名称 + 一句话描述」；当任务匹配时，模型再调用 skill 工具取完整指令。
@@ -1377,7 +1428,8 @@ function buildSendToSubagentTool(): ToolSpec {
 
 /**
  * 子智能体禁用的工具：交互类（ask_user）、再派发/续聊（run_subagent / send_to_subagent）、创建持久实体类
- * （create_* / propose_agent）、记忆写删（看不到与用户的对话，无从判断用户偏好）、skill。
+ * （create_* / propose_agent）、记忆写删（看不到与用户的对话，无从判断用户偏好）、skill、
+ * todo_write（待办清单是主对话给用户看的进度，子智能体的步骤收在 Task 卡里）。
  * 普通子智能体在工具表里就看不到它们（buildSubagentTools）；fork 沿用主对话的完整工具表以共享
  * 提示缓存，靠工具循环里 depth>0 的兜底拦截。
  */
@@ -1391,7 +1443,8 @@ const SUBAGENT_EXCLUDED = new Set([
   'create_mcp',
   'create_task',
   'memory_write',
-  'memory_delete'
+  'memory_delete',
+  'todo_write'
 ])
 
 /** 可在同一步内并发执行的内置只读工具：无副作用、彼此无先后依赖（见工具循环的 readRuns）。 */
@@ -1610,6 +1663,11 @@ interface AgentLoopArgs {
    */
   onPlanDecided?: (toolUseId: string, decision: 'approve' | 'keep' | null) => void
   /**
+   * todo_write 执行：写入会话的待办清单边车并推送进度，返回回灌给模型的结果。仅主轮传入；
+   * 缺省（子智能体 / 定时任务，工具集本就不含它）时按幻觉调用回指导性错误。
+   */
+  onTodoWrite?: (toolUseId: string, input: unknown) => { content: string; isError: boolean }
+  /**
    * 文件检查点记录器（供回滚）：写入类工具执行前后、run_command 执行后调用。主轮创建、透传给子轮
    * （子轮的写入归到父级 run_subagent 的 id，随父轮一起回滚）；定时任务不传（v1 不记录）。
    */
@@ -1645,6 +1703,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
   function emit(turnId: string, sessionId: string, event: ChatStreamEvent): void {
     publishChatEvent({ turnId, sessionId, event })
+  }
+
+  /** 推送某会话待办清单的状态（按轮删除 / 回滚 / 用户手动取消之后；不属于任何回合步骤，turnId 为空串）。 */
+  function emitTodos(s: StoredSession): void {
+    emit('', s.id, { type: 'todos', state: todoState(s.todos, s.todoCancelled) })
   }
 
   /** 广播回合开始：本轮用户消息（历史末条）按展示形态带出，与重载后看到的气泡一致。 */
@@ -1962,7 +2025,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         }
         if (tc.name === 'ask_user') args.onAskAnswered?.(tc.id, null)
         else if (tc.name === 'exit_plan') args.onPlanDecided?.(tc.id, null)
-        else {
+        else if (tc.name === 'todo_write') {
+          // 未执行：清单维持原状，对话流里本就没有它的卡，无需收敛。
+        } else {
           const label = reason === 'aborted' ? '未执行（已中止）' : '未执行'
           args.onToolSummary?.(tc.id, label)
           emit(turnId, sessionId, {
@@ -2064,8 +2129,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             const id = ev.id || `call_${randomUUID()}`
             toolCalls.push({ id, name: ev.name, args: ev.args })
             // ask_user / exit_plan 不画通用工具卡：循环走到它们时再发专用 ask_user / plan_review 事件
-            //（避免既有工具卡又有问答卡/计划卡）。
-            if (ev.name !== 'ask_user' && ev.name !== 'exit_plan')
+            //（避免既有工具卡又有问答卡/计划卡）。todo_write 同理：进度走 todos 事件进胶囊，不进对话流。
+            if (ev.name !== 'ask_user' && ev.name !== 'exit_plan' && ev.name !== 'todo_write')
               emit(turnId, sessionId, {
                 type: 'tool_call',
                 id,
@@ -2354,7 +2419,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
               type: 'tool_result',
               toolUseId: tc.id,
               content:
-                '用户已批准计划。现在请按已批准的计划开始执行（写入/执行无需再征求授权）。',
+                '用户已批准计划。现在请按已批准的计划开始执行（写入/执行无需再征求授权）；计划含多个步骤时，先用 todo_write 列出待办清单再逐项推进。',
               isError: false
             })
           } else if (decision === 'keep') {
@@ -2373,6 +2438,15 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
               isError: true
             })
           }
+          continue
+        }
+
+        // todo_write 特判：只写会话边车（待办清单）、推送进度，不过权限闸门、无任何副作用。
+        if (tc.name === 'todo_write') {
+          const r = args.onTodoWrite
+            ? args.onTodoWrite(tc.id, tc.args)
+            : { content: '当前环境不提供待办清单；请直接完成任务。', isError: true }
+          resultParts.push({ type: 'tool_result', toolUseId: tc.id, content: r.content, isError: r.isError })
           continue
         }
 
@@ -2760,6 +2834,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     const turnTools: ToolSpec[] = [
       ...toolSpecs,
       buildPlanTool(),
+      buildTodoTool(),
       ...(skillTool ? [skillTool] : []),
       subagentTool,
       buildSendToSubagentTool(),
@@ -2808,6 +2883,25 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         // exit_plan 决定 → plans 边车（按 toolUseId），供重开还原计划卡的已决态。
         onPlanDecided: (id, decision) => {
           ;(session.plans ??= {})[id] = { decision }
+        },
+        // todo_write → todos 边车（写入日志），推送进度；令清单全部完成的那次另发 todo_done 落卡。
+        // cancel → 记进已取消集合，胶囊收起。字段一律整体重新赋值（不原地改）：回滚撤销快照存的是引用。
+        onTodoWrite: (id, input) => {
+          const r = applyTodoWrite(session.todos, session.todoCancelled, id, input, Date.now())
+          if ('error' in r) return { content: r.error, isError: true }
+          if ('cancel' in r) {
+            if (!r.cancel) return { content: '当前没有进行中的待办清单，无需取消。', isError: false }
+            session.todoCancelled = [...(session.todoCancelled ?? []), r.cancel]
+            emit(turnId, sessionId, { type: 'todos', state: todoState(session.todos, session.todoCancelled) })
+            return { content: '已取消当前待办清单。', isError: false }
+          }
+          session.todos = [...(session.todos ?? []), r]
+          // 已取消的清单又被写入（条目有重合）：模型恢复了这项任务，重新显示。
+          if (session.todoCancelled?.includes(r.listId))
+            session.todoCancelled = session.todoCancelled.filter((x) => x !== r.listId)
+          emit(turnId, sessionId, { type: 'todos', state: todoState(session.todos, session.todoCancelled) })
+          if (r.done) emit(turnId, sessionId, { type: 'todo_done', id, title: r.title, items: r.items })
+          return { content: todoResultText(r), isError: false }
         },
         // 文件检查点（供回滚）：同一个记录器透传给子智能体，seq 全局递增。
         recorder: createRecorder(session),
@@ -3044,6 +3138,15 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       parts.unshift({ type: 'text', text: session.restoreNote })
       session.restoreNote = undefined
     }
+    // 待办清单的两类提醒，同样作为问题正文之前的独立 text 块（气泡里看不到）：用户在面板里手动取消过清单
+    // → 告知模型别再写回它（用一次即清）；上一轮留下未完成的清单（多为任务被暂停）→ 提醒模型继续就更新、
+    // 不再进行就传 cancel 取消。
+    if (session.todoCancelNote) {
+      parts.push({ type: 'text', text: session.todoCancelNote })
+      session.todoCancelNote = undefined
+    }
+    const todoNote = todoReminderText(session.todos, session.todoCancelled)
+    if (todoNote) parts.push({ type: 'text', text: todoNote })
     if (parts.length) {
       parts.push({ type: 'text', text: questionText })
       history.push({ role: 'user', content: parts })
@@ -3182,6 +3285,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           s.summaries ?? {},
           s.plans ?? {},
           s.autotasks ?? {},
+          s.todos ?? [],
           (to) => getSubagentMeta(s.id, to)
         )
       : []
@@ -3344,6 +3448,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       pendingUndo.delete(sessionId)
       saveProject(sessionId)
       collectBlobs(s)
+      emitTodos(s)
       return toDisplayMessages(
         s.messages,
         s.proposals ?? {},
@@ -3352,10 +3457,32 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         s.summaries ?? {},
         s.plans ?? {},
         s.autotasks ?? {},
+        s.todos ?? [],
         (to) => getSubagentMeta(s.id, to)
       )
     }
   )
+
+  // 待办清单：渲染层切到某会话时拉取当前状态（此后的变化都走 todos 事件推送）。
+  ipcMain.handle('chat:todos', (_e, sessionId: string): TodoState => {
+    const s = getSession(sessionId)
+    return todoState(s?.todos, s?.todoCancelled)
+  })
+
+  // 用户在面板里手动取消当前清单（不再进行）：胶囊收起，并在下一条消息里告知模型（todoCancelNote）。
+  // 回合进行中不受理——模型正在推进它，取消了也会被立刻写回；界面上此时按钮不可点，先停止任务再取消。
+  ipcMain.handle('chat:todo-cancel', (_e, sessionId: string): TodoState => {
+    const s = getSession(sessionId)
+    if (!s) return { active: null }
+    const cur = activeTodoList(s.todos, s.todoCancelled)
+    if (cur && !busySessions.has(sessionId)) {
+      s.todoCancelled = [...(s.todoCancelled ?? []), cur.id]
+      s.todoCancelNote = todoUserCancelNote(cur)
+      saveProject(sessionId)
+      emitTodos(s)
+    }
+    return todoState(s.todos, s.todoCancelled)
+  })
 
   // ───────── 检查点回滚（对标 Claude Code /rewind）─────────
   // 只由用户在回滚面板里触发、不经工具闸门，故自守两条：路径只来自记录、链接跳过
@@ -3372,6 +3499,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       s.summaries ?? {},
       s.plans ?? {},
       s.autotasks ?? {},
+      s.todos ?? [],
       (to) => getSubagentMeta(s.id, to)
     )
 
@@ -3439,6 +3567,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             summaries: s.summaries,
             plans: s.plans,
             autotasks: s.autotasks,
+            todos: s.todos,
+            todoCancelled: s.todoCancelled,
             checkpoints: s.checkpoints,
             lastKnown: s.lastKnown ? { ...s.lastKnown } : undefined,
             restoreNote: s.restoreNote,
@@ -3477,6 +3607,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         if (withConversation || restored.length) pendingUndo.set(s.id, undo)
         s.updatedAt = Date.now()
         saveProject(s.id)
+        if (withConversation) emitTodos(s)
         return { ok: true, messages: displayOf(s), restored, skipped }
       } finally {
         rewinding.delete(s.id)
@@ -3506,6 +3637,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         s.updatedAt = Date.now()
         saveProject(sessionId)
         collectBlobs(s)
+        emitTodos(s)
         return { ok: true, messages: displayOf(s), restored: r.restored, skipped: r.skipped }
       } finally {
         rewinding.delete(sessionId)

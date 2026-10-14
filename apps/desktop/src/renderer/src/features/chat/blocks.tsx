@@ -27,13 +27,15 @@ import {
   ClipboardList,
   ClipboardCheck,
   Brain,
-  FolderOpen
+  FolderOpen,
+  ListChecks
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ChatBlock, ChatMessage, StreamStatus, ToolStatus } from '../../store/chat'
 import { Markdown } from './Markdown'
 import { HumationFace } from '../../components/humation'
 import { TaskConfirmCard } from './TaskConfirmCard'
+import { TodoItemList } from './Todos'
 
 /**
  * 助手消息的块渲染（对话优先外壳复用）：文本 / 思考 / 工具卡 / 子智能体 / 挂载请求 / 计划审阅 /
@@ -54,7 +56,9 @@ const TOOL_META: Record<string, { icon: React.ReactNode; key: string }> = {
   create_mcp: { icon: <Plug size={14} />, key: 'chat.tool.createMcp' },
   memory_read: { icon: <Brain size={14} />, key: 'chat.tool.memoryRead' },
   memory_write: { icon: <Brain size={14} />, key: 'chat.tool.memoryWrite' },
-  memory_delete: { icon: <Brain size={14} />, key: 'chat.tool.memoryDelete' }
+  memory_delete: { icon: <Brain size={14} />, key: 'chat.tool.memoryDelete' },
+  // 正常的 todo_write 不画工具卡（进度在胶囊里）；只有参数被输出上限截断的那次会以普通工具卡出现。
+  todo_write: { icon: <ListChecks size={14} />, key: 'chat.tool.todoWrite' }
 }
 
 /**
@@ -353,6 +357,13 @@ export function BlockView({
   if (block.kind === 'mount') {
     return <MountRequestCard block={block} onMountReq={onMountReq} />
   }
+
+  if (block.kind === 'todolist') {
+    return <TodoDoneCard block={block} />
+  }
+
+  // 步骤边界标记：只服务于重连时丢残缺尾部的判定，不渲染。
+  if (block.kind === 'step') return null
 
   // notice：回合终止说明（截断/空回合）或上下文压缩结果，弱化提示样式，区别于红色错误
   if (block.kind === 'notice') {
@@ -918,7 +929,7 @@ export function groupBlocks(blocks: ChatBlock[]): BlockItem[] {
     if (b.kind === 'tool') {
       run.push({ block: b, index: i })
       tools.push(b)
-    } else if (b.kind === 'text' && !b.text.trim() && tools.length > 0) {
+    } else if (((b.kind === 'text' && !b.text.trim()) || b.kind === 'step') && tools.length > 0) {
       run.push({ block: b, index: i })
     } else {
       flush()
@@ -1036,6 +1047,46 @@ function SubagentCard({
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 已完成的待办清单卡：清单全部完成时落在对话流里（输入框上方的进度胶囊随之收起）。默认收起，
+ * 展开看全部条目。纯展示，不进模型上下文。
+ */
+function TodoDoneCard({
+  block
+}: {
+  block: Extract<ChatBlock, { kind: 'todolist' }>
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`subagent todocard${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="subagent__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight size={13} className="subagent__caret" />
+        <span className="subagent__head-icon">
+          <ClipboardCheck size={14} />
+        </span>
+        <span className="subagent__title">
+          {t('chat.todo.doneTitle')} · <strong>{block.title || t('chat.todo.untitled')}</strong>
+          <span className="subagent__count">
+            {block.items.length} {t('chat.todo.itemUnit')}
+          </span>
+        </span>
+        <ToolBadge status="ok" summary={t('chat.todo.finished')} />
+      </button>
+      {open && (
+        <div className="subagent__body">
+          <TodoItemList items={block.items} />
         </div>
       )}
     </div>

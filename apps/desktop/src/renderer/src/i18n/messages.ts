@@ -237,6 +237,7 @@ const zhCN: MessageTree = {
       memoryRead: '读取记忆',
       memoryWrite: '记住',
       memoryDelete: '删除记忆',
+      todoWrite: '更新待办清单',
       unknown: '调用工具'
     },
     status: { running: '执行中', done: '完成', failed: '失败', denied: '已拒绝' },
@@ -288,6 +289,20 @@ const zhCN: MessageTree = {
       prev: '上一步',
       next: '下一步',
       noAnswer: '（未作答）'
+    },
+    todo: {
+      untitled: '任务清单',
+      cancel: '取消清单',
+      cancelHint: '不再进行此清单，胶囊随之收起；下一条消息会告知助手',
+      cancelBusy: '任务进行中，先停止再取消清单',
+      open: '查看待办清单',
+      waiting: '待开始',
+      doneTitle: '已完成清单',
+      itemUnit: '项',
+      finished: '已完成',
+      pending: '待办',
+      inProgress: '进行中',
+      completed: '已完成'
     },
     plan: {
       cardTitle: '待批准的计划',
@@ -1069,6 +1084,7 @@ const en: MessageTree = {
       memoryRead: 'Read memory',
       memoryWrite: 'Remember',
       memoryDelete: 'Forget memory',
+      todoWrite: 'Update todo list',
       unknown: 'Call tool'
     },
     status: { running: 'Running', done: 'Done', failed: 'Failed', denied: 'Denied' },
@@ -1118,6 +1134,20 @@ const en: MessageTree = {
       prev: 'Previous',
       next: 'Next',
       noAnswer: '(no answer)'
+    },
+    todo: {
+      untitled: 'Task list',
+      cancel: 'Cancel list',
+      cancelHint: 'Stop tracking this list and hide the pill; the assistant is told with your next message',
+      cancelBusy: 'A task is running — stop it before cancelling the list',
+      open: 'View todo list',
+      waiting: 'Not started',
+      doneTitle: 'Completed list',
+      itemUnit: 'items',
+      finished: 'Done',
+      pending: 'Pending',
+      inProgress: 'In progress',
+      completed: 'Completed'
     },
     plan: {
       cardTitle: 'Plan for review',

@@ -154,6 +154,8 @@ export type DisplayBlock =
    * 恒为终态：'approve'/'keep' = 用户的决定；'cancelled' = 中止 / 未决。重建卡一律只读、不再可点。
    */
   | { kind: 'plan'; id: string; plan: string; decision: 'approve' | 'keep' | 'cancelled' }
+  /** 已完成的待办清单卡（重建）：画在令清单全部完成的那次 todo_write 处；其余 todo_write 不画。 */
+  | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 
 export type DisplayMessage =
   | { role: 'user'; text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] }
@@ -242,6 +244,27 @@ export interface AskResponse {
 export interface PlanResponse {
   key: string
   decision: 'approve' | 'keep'
+}
+
+/** 待办清单的一项（与 services/todos.ts 对齐）。 */
+export interface TodoItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** 一个待办清单（同一清单的多次 todo_write 折叠后的现状）。 */
+export interface TodoList {
+  id: string
+  /** 可为空串：界面回落通用名。 */
+  title: string
+  items: TodoItem[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** 某会话待办清单的状态：胶囊显示的当前清单（无进行中的清单——没建过 / 已完成 / 已取消——则 null）。 */
+export interface TodoState {
+  active: TodoList | null
 }
 
 /** 用户对「请求挂载工作区」的回应：path=已选目录的绝对路径；null=暂不挂载。 */
@@ -611,6 +634,10 @@ export type ChatStreamEvent =
   | { type: 'ask_user'; key: string; questions: AskQuestion[] }
   /** 计划审阅：exit_plan 提交计划，暂停等待用户批准（approve/keep）。 */
   | { type: 'plan_review'; key: string; plan: string }
+  /** 待办清单状态（会话级）：每次 todo_write、按轮删除 / 回滚 / 用户手动取消后推送；后几种 turnId 为空串。 */
+  | { type: 'todos'; state: TodoState }
+  /** 本次 todo_write 令清单全部完成：在对话流里落一张「已完成清单」卡。 */
+  | { type: 'todo_done'; id: string; title: string; items: TodoItem[] }
   /**
    * 请求挂载工作区：未挂载工作区时，模型的某次调用缺「相对路径基准」（写相对路径 / 扫描类工具
    * 省略 path），暂停等待用户一键挂载或跳过。tool=触发的工具名，path=模型给的相对路径（可为空）。
@@ -870,6 +897,11 @@ const api = {
       turnIndices: number[]
     ): Promise<DisplayMessage[]> =>
       ipcRenderer.invoke('chat:delete-turns', sessionId, workspaceRoot, turnIndices),
+    /** 待办清单：某会话的当前状态（切到该会话时拉取，此后的变化走 todos 事件）。 */
+    todos: (sessionId: string): Promise<TodoState> => ipcRenderer.invoke('chat:todos', sessionId),
+    /** 手动取消当前清单（回合进行中不受理）：胶囊收起，下一条消息告知模型。返回取消后的状态。 */
+    cancelTodoList: (sessionId: string): Promise<TodoState> =>
+      ipcRenderer.invoke('chat:todo-cancel', sessionId),
     /** 检查点回滚·列表：每轮的改动量 + 能否撤销上次回滚。 */
     rewindList: (sessionId: string): Promise<{ turns: RewindTurnStat[]; canUndo: boolean }> =>
       ipcRenderer.invoke('chat:rewind-list', sessionId),

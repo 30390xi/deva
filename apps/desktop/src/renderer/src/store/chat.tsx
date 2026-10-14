@@ -13,7 +13,9 @@ import type {
   ResolveAutotaskResult,
   RewindApplyResult,
   RewindMode,
-  RewindUndoResult
+  RewindUndoResult,
+  TodoItem,
+  TodoState
 } from '../../../preload'
 import { useI18n } from '../i18n/i18n'
 import { useToast } from '../components/ToastProvider'
@@ -160,6 +162,24 @@ export type ChatBlock =
       /** decided='mounted' 时的已挂载目录，供卡片展示。 */
       root?: string
     }
+  | {
+      /**
+       * 已完成的待办清单卡：todo_write 令清单全部完成时落在对话流里，可展开查看条目。
+       * 纯展示（不进模型上下文）；重开时由主进程按 todos 边车在同一位置重建。
+       */
+      kind: 'todolist'
+      /** 令清单完成的那次 todo_write 的 toolUseId。 */
+      id: string
+      title: string
+      items: TodoItem[]
+    }
+  | {
+      /**
+       * 步骤边界（不渲染）：本步执行过不画卡的 todo_write，说明本步已提交。重连丢弃残缺尾部时以此为界，
+       * 免得把本步已提交的正文一并丢掉（见 dropStepPartial）。只活在流式渲染态，重开不重建。
+       */
+      kind: 'step'
+    }
   | { kind: 'error'; message: string }
   /**
    * 回合终止 / 上下文压缩提示（非错误，弱化样式）。
@@ -246,6 +266,7 @@ type DisplayBlock =
     }
   | { kind: 'ask'; id: string; questions: AskQuestion[]; answers?: string[] | null }
   | { kind: 'plan'; id: string; plan: string; decision: 'approve' | 'keep' | 'cancelled' }
+  | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 type DisplayMessage =
   | { role: 'user'; text: string; attachments: { name: string; kind: AttachKind }[] }
   | { role: 'assistant'; blocks: DisplayBlock[] }
@@ -275,6 +296,8 @@ type StreamEvent =
     }
   | { type: 'ask_user'; key: string; questions: AskQuestion[] }
   | { type: 'plan_review'; key: string; plan: string }
+  | { type: 'todos'; state: TodoState }
+  | { type: 'todo_done'; id: string; title: string; items: TodoItem[] }
   | { type: 'mount_request'; key: string; tool: string; path: string }
   | { type: 'usage'; input: number; output: number; cacheRead?: number; cacheWrite?: number }
   | { type: 'reconnecting'; attempt: number; max: number }
@@ -424,6 +447,10 @@ interface ChatContextValue {
     action: 'create' | 'dismiss',
     taskInput?: TaskCreateInput
   ) => Promise<ResolveAutotaskResult>
+  /** 当前会话的待办清单状态（输入框上方的进度胶囊 + 清单面板）。无进行中的清单时 active 为 null。 */
+  todos: TodoState
+  /** 手动取消当前会话的清单（不再进行）：胶囊收起，下一条消息告知模型。回合进行中主进程不受理。 */
+  cancelTodoList: () => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -476,6 +503,8 @@ function displayToMessages(dms: DisplayMessage[]): ChatMessage[] {
       // 历史回填：exit_plan 计划卡。主进程已把 decision 归一为终态（approve/keep/cancelled），此处原样
       // 复原为只读展示——历史里的计划卡必定属于已结束的回合，画出按钮只会是点不动的摆设。
       if (b.kind === 'plan') return { kind: 'plan', key: b.id, plan: b.plan, decided: b.decision }
+      // 历史回填：已完成的待办清单卡（条目取自主进程 todos 边车里令其完成的那次快照）。
+      if (b.kind === 'todolist') return { kind: 'todolist', id: b.id, title: b.title, items: b.items }
       const status: ToolStatus = b.status === 'error' ? 'error' : 'ok'
       // 历史回填：run_subagent / send_to_subagent 复原为折叠 Task 卡（内部子调用不入父历史，故 children
       // 为空、仅存结论）。
@@ -667,6 +696,9 @@ function reduceBlocks(blocks: ChatBlock[], ev: StreamEvent): ChatBlock[] {
     case 'plan_review':
       next.push({ kind: 'plan', key: ev.key, plan: ev.plan })
       return next
+    case 'todo_done':
+      next.push({ kind: 'todolist', id: ev.id, title: ev.title, items: ev.items })
+      return next
     case 'mount_request':
       next.push({ kind: 'mount', key: ev.key, tool: ev.tool, path: ev.path })
       return next
@@ -692,22 +724,28 @@ function reduceBlocks(blocks: ChatBlock[], ev: StreamEvent): ChatBlock[] {
 function dropStepPartial(blocks: ChatBlock[]): ChatBlock[] {
   let lastTool = -1
   for (let i = blocks.length - 1; i >= 0; i--) {
-    // 工具卡与子智能体 Task 卡都是「步骤边界」：其后才是本步残缺的 thinking/text 尾部。
-    if (blocks[i].kind === 'tool' || blocks[i].kind === 'subagent') {
+    // 工具卡、子智能体 Task 卡、已完成清单卡与步骤标记都是「步骤边界」：其后才是本步残缺的 thinking/text 尾部。
+    const k = blocks[i].kind
+    if (k === 'tool' || k === 'subagent' || k === 'todolist' || k === 'step') {
       lastTool = i
       break
     }
   }
-  if (lastTool === blocks.length - 1) return blocks // 已在工具/Task 卡处收尾，无残缺
+  if (lastTool === blocks.length - 1) return blocks // 已在步骤边界处收尾，无残缺
   return blocks.slice(0, lastTool + 1)
 }
 
-/** 本轮是否已有「可见回复」：正文/工具/子卡/问答/错误/提示任一即算；纯思考或全空不算。 */
+/**
+ * 本轮是否已有「可见回复」：正文/工具/子卡/问答/错误/提示任一即算；纯思考或全空不算。
+ * 调过 todo_write（step / todolist）也算——与主进程「有工具调用即算」同义，否则只更新了清单的一轮会被误补空回合提示。
+ */
 function hasVisibleAnswer(blocks: ChatBlock[]): boolean {
   return blocks.some(
     (b) =>
       (b.kind === 'text' && b.text.trim() !== '') ||
       b.kind === 'tool' ||
+      b.kind === 'step' ||
+      b.kind === 'todolist' ||
       b.kind === 'subagent' ||
       b.kind === 'ask' ||
       b.kind === 'mount' ||
@@ -821,6 +859,9 @@ const EMPTY_RUNTIME: SessionRuntime = Object.freeze({
   reconnecting: null,
   external: false
 })
+
+/** 尚无待办清单的会话对外暴露的空状态（稳定引用）。 */
+const EMPTY_TODOS: TodoState = Object.freeze({ active: null })
 
 /** 当前所视会话无活动态时对外暴露的空消息数组（稳定引用，避免每次渲染新建）。 */
 const EMPTY_MESSAGES: ChatMessage[] = Object.freeze([]) as unknown as ChatMessage[]
@@ -942,6 +983,17 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
     },
     [patchRuntime]
   )
+
+  // 各会话的待办清单状态（键=sessionId）：todos 事件推送、切到会话时拉取。本窗口收得到所有会话的事件，
+  // 故缓存不会过期。ref 供事件回调 / 拉取回调同步读（判定拉取期间事件是否已先到）。
+  const [todoStates, setTodoStates] = useState<Map<string, TodoState>>(() => new Map())
+  const todoStatesRef = useRef(todoStates)
+  const setTodoState = useCallback((sid: string, st: TodoState): void => {
+    const map = new Map(todoStatesRef.current)
+    map.set(sid, st)
+    todoStatesRef.current = map
+    setTodoStates(map)
+  }, [])
 
   // 只改某会话消息序列的便捷 patch（复用 updateLastAssistant 的引用短路，无变更则不提交）。
   const patchMessages = useCallback(
@@ -1122,6 +1174,15 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
         return
       }
 
+      // 待办清单状态是会话级的（按轮删除 / 回滚 / 手动取消后也会推，此时 turnId 为空串）：不论本层是否
+      // 正流式该会话，一律记下最新值，胶囊据此显示。
+      if (ev.type === 'todos') {
+        setTodoState(sid, ev.state)
+        // 本层正流式的这一轮调了 todo_write：记一个步骤边界（它不画卡，重连丢残缺尾部时别把本步正文一并丢掉）。
+        if (localStreaming && payload.turnId) patchMessages(sid, (b) => [...b, { kind: 'step' }])
+        return
+      }
+
       // 本回合压缩成功（自动或 /compact）：主进程历史已改写为「摘要 + 近期轮」，本层气泡却仍是全量，
       // 两边的轮下标因此错开被压掉的轮数，回滚 / 删轮会落到错的轮上。先记下，done 时以主进程为准重载。
       if (ev.type === 'compacted' && ev.status === 'compacted') compactedSids.add(sid)
@@ -1217,7 +1278,28 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       })
     })
     return unsub
-  }, [refreshSessions, patchRuntime, patchMessages, patchCardBlocks, dropRuntime, attachSession, toast])
+  }, [
+    refreshSessions,
+    patchRuntime,
+    patchMessages,
+    patchCardBlocks,
+    dropRuntime,
+    attachSession,
+    toast,
+    setTodoState
+  ])
+
+  // 切到某会话时拉取其待办清单（此后的变化走 todos 事件）。拉取期间事件已先到则以事件为准。
+  useEffect(() => {
+    const sid = currentSessionId
+    if (!sid || todoStatesRef.current.has(sid)) return
+    window.deva.chat
+      .todos(sid)
+      .then((st) => {
+        if (!todoStatesRef.current.has(sid)) setTodoState(sid, st)
+      })
+      .catch(() => undefined)
+  }, [currentSessionId, setTodoState])
 
   // 回合之外新建的对话（手机上 /new，还没发消息）：没有 turn_start 可借，主进程单独通知刷新列表。
   useEffect(() => window.deva.chat.onSessionsChanged(() => void refreshSessions()), [refreshSessions])
@@ -1682,6 +1764,15 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       return res
     }
 
+    const cancelTodoList = (): void => {
+      const sid = sessionIdRef.current
+      if (!sid) return
+      window.deva.chat
+        .cancelTodoList(sid)
+        .then((st) => setTodoState(sid, st))
+        .catch(() => undefined)
+    }
+
     return {
       sessions,
       currentSessionId,
@@ -1706,11 +1797,15 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       respondPlan,
       respondMount,
       resolveProposal,
-      resolveAutotask
+      resolveAutotask,
+      todos: todoStates.get(currentSessionId) ?? EMPTY_TODOS,
+      cancelTodoList
     }
   }, [
     sessions,
     currentSessionId,
+    todoStates,
+    setTodoState,
     messages,
     streaming,
     streamStatus,

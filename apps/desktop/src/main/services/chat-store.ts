@@ -12,6 +12,7 @@ import { join } from 'path'
 import { getDevaHome } from './config'
 import type { Message } from '../providers/types'
 import type { CheckpointRec } from './checkpoints'
+import type { TodoEntry } from './todos'
 
 /**
  * 对话持久化（主进程）· 一对话一文件。
@@ -117,6 +118,19 @@ export interface StoredSession {
    * 时无需调整（同 proposals）。见 chat.ts:chat:resolve-autotask。
    */
   autotasks?: Record<string, { status: 'created' | 'dismissed'; taskId?: string }>
+  /**
+   * 待办清单（todo_write）的写入日志：每次调用记一条完整快照（按 toolUseId），清单现状由日志折叠得出。
+   * 纯展示产物、不进模型上下文。按 toolUseId 记录，故压缩重排 messages 时无需调整；按轮删除 / 回滚时
+   * 删掉被删轮里的那几条快照（**不按存活 tool_use 修剪**：被压缩掉的写入仍是清单的现状）。见 services/todos.ts。
+   */
+  todos?: TodoEntry[]
+  /**
+   * 已取消的清单 id（不再进行：模型 todo_write 传 cancel，或用户在面板里手动取消）：胶囊不再显示它，
+   * 直到模型再次写入该清单（视为恢复）。见 services/todos.ts 文件头「取消」。
+   */
+  todoCancelled?: string[]
+  /** 用户手动取消清单后待告知模型的说明：下一次 chat:send 作为独立 text 块注入，注入即清空（同 restoreNote）。 */
+  todoCancelNote?: string
   /**
    * 文件检查点记录（供回滚），按 toolUseId 记录该次工具调用的写入 / 命令（子智能体的写入归到父级
    * run_subagent 的 id）。**不存轮下标**：回滚时由 tool_use 所在的轮反查，故压缩 / 删轮后不会错位。

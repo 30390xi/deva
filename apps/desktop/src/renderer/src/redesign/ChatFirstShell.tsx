@@ -68,6 +68,7 @@ import type {
 import { ScheduleEditor } from '../features/chat/ScheduleEditor'
 import { TaskModelSelect, TaskPersonaSelect } from '../features/chat/TaskPickers'
 import { taskErrorKey } from '../features/chat/TaskConfirmCard'
+import { TodoCapsule } from '../features/chat/Todos'
 import {
   useChat,
   type AgentDraft,
@@ -3708,18 +3709,6 @@ function Composer({
 
   return (
     <div className="cf-composer">
-      {/* 顶边拖拽手柄：向上拖加高输入框。 */}
-      <ResizeHandle
-        axis="y"
-        value={boxH}
-        title={t('cf.resizeComposer')}
-        onChange={(v) => setComposerH(clampComposer(v, window.innerHeight))}
-        onCommit={() => saveLayout({ composerHeight: boxHRef.current })}
-        onReset={() => {
-          setComposerH(COMPOSER_DEFAULT)
-          saveLayout({ composerHeight: undefined })
-        }}
-      />
       {/* 回到最新：仅当用户上滚离开底部且已有消息时浮现，锚在输入区正上方居中 */}
       {showJump && (
         <button
@@ -3770,7 +3759,22 @@ function Composer({
             <div className="cf-slash__hint">{t('cf.slash.hint')}</div>
           </div>
         )}
+        {/* 待办清单进度胶囊：有进行中的清单才出现，点开向上展开清单面板。 */}
+        <TodoCapsule />
         <div className="cf-box">
+          {/* 拖拽手柄压在输入框上边框：向上拖加高输入框。 */}
+          <ResizeHandle
+            axis="y"
+            className="cf-resizer--box"
+            value={boxH}
+            title={t('cf.resizeComposer')}
+            onChange={(v) => setComposerH(clampComposer(v, window.innerHeight))}
+            onCommit={() => saveLayout({ composerHeight: boxHRef.current })}
+            onReset={() => {
+              setComposerH(COMPOSER_DEFAULT)
+              saveLayout({ composerHeight: undefined })
+            }}
+          />
           {pending.length > 0 && (
             <div className="cf-composer__files">
               {pending.map((p) => (

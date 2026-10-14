@@ -450,6 +450,61 @@ export function buildPlanTool(): ToolSpec {
 }
 
 /**
+ * todo_write 工具规格。常驻主轮工具集：模型在多步任务里列出并逐项勾选待办清单（或取消不再进行的清单），
+ * 界面以进度胶囊显示。
+ * 在 runAgentLoop 内「闸门前特判」，只写会话边车（StoredSession.todos），不走 executeTool、无任何副作用。
+ */
+export function buildTodoTool(): ToolSpec {
+  return {
+    name: 'todo_write',
+    description:
+      '创建并维护当前任务的待办清单，界面会在输入框上方以进度胶囊实时显示给用户。' +
+      '适用：需要 3 步及以上的多步骤任务、计划获批后开始执行、用户一次交代了多件事。不适用：单步或琐碎的任务、纯答疑。' +
+      '每次调用都传**完整**清单（整表覆盖，不是增量）；同一时刻只保留一项 in_progress；开始某项前先把它标为 in_progress，' +
+      '做完立即标为 completed（别攒到最后一起勾）；执行中发现新步骤随时补进清单，不再需要的项直接删掉。' +
+      '某项受阻或失败时保持 in_progress，并新增一项写明要解决的问题，切勿谎报完成。' +
+      '清单全部完成后界面会把它收成一张「已完成清单」卡；之后开始另一件事直接写新清单即可。' +
+      '任务被暂停、用户转向别的事而不再进行当前清单时，传 cancel: true 取消它（无需 todos）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          description: '完整的待办清单，按执行顺序排列。',
+          items: {
+            type: 'object',
+            properties: {
+              content: {
+                type: 'string',
+                description: '这一项要做的事：简短的祈使句（如「实现登录接口」）。'
+              },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed'],
+                description: 'pending=待办 / in_progress=进行中（同一时刻只一项）/ completed=已完成。'
+              }
+            },
+            required: ['content', 'status']
+          }
+        },
+        title: {
+          type: 'string',
+          description: '清单标题，概括这件事（如「实现登录功能」）。新开清单时给出，更新时可省略。'
+        },
+        new_list: {
+          type: 'boolean',
+          description: '当前清单尚未完成、却要放下它另起一件新事时传 true；平常更新省略。'
+        },
+        cancel: {
+          type: 'boolean',
+          description: '取消当前清单（不再进行这项任务）时传 true，此时省略 todos；平常更新省略。'
+        }
+      }
+    }
+  }
+}
+
+/**
  * 工具敏感度分类，供权限闸门判定：read 恒放行，edit=项目内写入，exec=执行类（命令执行），
  * mcp=外部 MCP 服务暴露的工具（默认 ask，可按会话记住；结果恒作数据）。
  */
@@ -478,7 +533,9 @@ const READ_TOOLS = new Set([
   // 惰性提议工具：不写盘、不弹权限框；真正的授权是用户在名片里点「创建」（走渲染层 chat:resolve-autotask）。
   'create_task',
   // exit_plan：提交计划，循环内「闸门前特判」，恒不落到 executeTool；列此仅兜底。
-  'exit_plan'
+  'exit_plan',
+  // todo_write：只写会话边车（待办清单），同为闸门前特判；列此仅兜底。
+  'todo_write'
 ])
 
 /** 已连接 MCP 服务注册的命名空间化工具名（serverId__toolName）。连接时注册、断开时反注册。 */

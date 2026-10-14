@@ -367,7 +367,8 @@ const TOOL_LABELS: Record<string, string> = {
   memory_read: '读取记忆',
   memory_write: '写入记忆',
   memory_delete: '删除记忆',
-  create_mcp: '配置 MCP'
+  create_mcp: '配置 MCP',
+  todo_write: '更新待办清单'
 }
 
 function toolBrief(args: unknown): string {
@@ -467,6 +468,13 @@ function reduce(t: TurnTrack, ev: ChatStreamEvent): boolean {
     case 'error':
       b.push({ kind: 'error', text: ev.message })
       return true
+    case 'todo_done': {
+      // 清单进度不逐条推（桌面靠胶囊看）；全部完成时留一句，对应桌面对话流里那张「已完成清单」卡。
+      content()
+      const name = ev.title ? `「${ev.title}」` : ''
+      b.push({ kind: 'notice', text: `已完成待办清单${name}（${ev.items.length} 项）。` })
+      return true
+    }
     case 'compacted':
       if (ev.status !== 'compacted') return false
       b.push({ kind: 'notice', text: '较早的对话已压缩为摘要。' })
@@ -727,7 +735,8 @@ function onBusEvent({ turnId, sessionId, event }: ChatEventPayload): void {
   if (event.type === 'interaction_resolved') return applyResolution(event)
   if (event.type === 'card_resolved') return applyCardResolution(sessionId, event)
   // 回合开始只为桌面窗口补用户气泡；手机端的回合视图在首个内容事件时建立。
-  if (event.type === 'usage' || event.type === 'turn_start') return
+  // 待办清单状态是会话级的胶囊数据（可能不属于任何回合），手机端不展示。
+  if (event.type === 'usage' || event.type === 'turn_start' || event.type === 'todos') return
   // 桌面手动 /compact 也走回合事件，但不是一轮对话：不推。
   if (event.type === 'compacted' && event.scope === 'manual') return
 
