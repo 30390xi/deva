@@ -32,8 +32,9 @@ interface ModelsContextValue {
    * 新建自定义服务商。purpose 决定其能力轴：
    * 'llm'（默认）= 对话模型（adapter openai，可切协议）；
    * 'decision' = 决策模型（adapter 固定 jev，带默认触发阈值，不生成文本、不入对话选择器）。
+   * 返回新服务商 id（对话区「接入模型」引导据此写入地址/密钥/模型）。
    */
-  addCustomProvider: (name: string, purpose?: ProviderPurpose) => void
+  addCustomProvider: (name: string, purpose?: ProviderPurpose) => string
   /**
    * 用官方预置一键套用到某个（自定义）服务商：覆盖名称/协议/地址/文档/品牌色，并替换模型清单。
    * 不改 kind（保持自定义）与 enabled（是否启用交由用户），也不动密钥。
@@ -46,6 +47,8 @@ interface ModelsContextValue {
   setApiKey: (providerId: string, key: string) => Promise<{ ok: boolean; available: boolean }>
   /** 当前环境是否支持加密存储（否则拒绝保存密钥，UI 需降级提示） */
   secretsAvailable: boolean
+  /** 持久化配置是否已载入：之前 providers 只是种子（无模型），据此判「无可用模型」会在启动瞬间误判。 */
+  ready: boolean
 }
 
 const ModelsContext = createContext<ModelsContextValue | null>(null)
@@ -61,6 +64,13 @@ export function findActive(providers: Provider[], activeId: string | null) {
   const provider = providers.find((p) => p.id === pid)
   const model = provider?.models.find((mm) => mm.id === mid)
   return provider && model ? { provider, model } : null
+}
+
+/** 是否至少有一个可在对话里选用的模型（已启用的对话服务商 × 已启用模型；与输入框模型选择器同口径）。 */
+export function hasUsableModel(providers: Provider[]): boolean {
+  return providers.some(
+    (p) => p.enabled && (p.purpose ?? 'llm') === 'llm' && p.models.some((mm) => mm.enabled)
+  )
 }
 
 export function ModelsProvider({ children }: { children: ReactNode }): React.JSX.Element {
@@ -238,6 +248,7 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
           }
         ])
         setSelectedProviderId(id)
+        return id
       },
       hasKey: (providerId) => Boolean(keyStatus[providerId]),
       setApiKey: async (providerId, key) => {
@@ -249,9 +260,10 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
         }
         return res
       },
-      secretsAvailable
+      secretsAvailable,
+      ready: hydrated
     }),
-    [providers, selectedProviderId, activeModelId, keyStatus, secretsAvailable]
+    [providers, selectedProviderId, activeModelId, keyStatus, secretsAvailable, hydrated]
   )
 
   return <ModelsContext.Provider value={value}>{children}</ModelsContext.Provider>

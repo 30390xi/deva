@@ -19,7 +19,7 @@ import type {
 } from '../../../preload'
 import { useI18n } from '../i18n/i18n'
 import { useToast } from '../components/ToastProvider'
-import { useModels, findActive } from './models'
+import { useModels, findActive, hasUsableModel } from './models'
 import { useWorkspace } from './workspace'
 
 /**
@@ -1458,9 +1458,11 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       const sessionModelRef = ov && ov.model !== undefined ? ov.model : meta?.model
       const model = findActive(providers, sessionModelRef ?? null) ?? activeModel
 
-      // 未选模型：只弹 toast，对话流不动（不加用户气泡、不留红框）。
+      // 未选模型：只弹 toast，对话流不动（不加用户气泡、不留红框）。一个可用模型都没有时，
+      // 对话区正显示「接入模型」引导卡，提示改为指向它（而非让新用户去翻设置页）。
       const noModel = (): false => {
-        toast.show({ variant: 'warning', message: t('chat.noModel'), duration: 6000 })
+        const msg = hasUsableModel(providers) ? t('chat.noModel') : t('chat.setup.noModel')
+        toast.show({ variant: 'warning', message: msg, duration: 6000 })
         return false
       }
       const sendFailed = (msg: string): false => {

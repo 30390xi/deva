@@ -1724,6 +1724,231 @@ textarea {
   background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 
+/* 「接入模型」引导卡（无可用模型时显示在对话区）：与问答卡同一套 accent 观感，三步向导。 */
+.setup {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elevated));
+  padding: var(--space-3);
+  margin-top: var(--space-2);
+  text-align: left;
+}
+.setup__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+.setup__head-icon {
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+}
+.setup__progress {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.setup__hint {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-3);
+}
+/* 服务商平铺：按可用宽度自动排列。 */
+.setup__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+.setup__tile {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  text-align: left;
+}
+.setup__tile:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.setup__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+}
+.setup__tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.setup__tile-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.setup__tile-desc {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.setup__chosen {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+.setup__chosen .setup__dot {
+  margin-top: 0;
+}
+.setup__steps {
+  margin: 0 0 var(--space-2);
+  padding-left: 1.4em;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--fg);
+}
+.setup__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: var(--space-3);
+}
+.setup__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-3);
+}
+.setup__field .input {
+  flex: none;
+  width: 100%;
+}
+.setup__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.setup__err {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.setup__err svg {
+  flex: none;
+  margin-top: 3px;
+}
+.setup__textbtn {
+  padding: 0;
+  margin-left: var(--space-2);
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.setup__models + .setup__textbtn {
+  margin: var(--space-2) 0 0;
+}
+.setup__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-2);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+}
+.setup__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+}
+.setup__models {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.setup__model {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  text-align: left;
+  font-size: 13px;
+}
+.setup__model:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.setup__model svg {
+  flex: none;
+  color: var(--fg-muted);
+}
+.setup__model.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+.setup__model.is-on svg {
+  color: var(--accent);
+}
+.setup__model-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.setup__model .ask__reco {
+  margin-left: auto;
+}
+.setup__empty {
+  padding: var(--space-2);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.setup__manual {
+  width: 100%;
+}
+.setup__actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-3);
+}
+
 /* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex;
@@ -3849,6 +4074,20 @@ button.projmenu__item:disabled {
 }
 .provider-detail__name-input:hover {
   border-color: var(--border);
+}
+/* 名称 + 常驻铅笔：让「可改名」一眼可见；悬停名称区时铅笔转 accent。 */
+.provider-detail__name-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.provider-detail__name-pen {
+  color: var(--fg-subtle);
+}
+.provider-detail__name-edit:hover .provider-detail__name-pen,
+.provider-detail__name-input:focus + .provider-detail__name-pen {
+  color: var(--accent);
 }
 .provider-detail__name-input:focus {
   outline: none;

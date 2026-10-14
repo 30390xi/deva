@@ -69,6 +69,7 @@ import { ScheduleEditor } from '../features/chat/ScheduleEditor'
 import { TaskModelSelect, TaskPersonaSelect } from '../features/chat/TaskPickers'
 import { taskErrorKey } from '../features/chat/TaskConfirmCard'
 import { TodoCapsule } from '../features/chat/Todos'
+import { ModelSetupCard } from '../features/chat/ModelSetupCard'
 import {
   useChat,
   type AgentDraft,
@@ -81,7 +82,7 @@ import {
   type SessionMeta
 } from '../store/chat'
 import { useExtensions } from '../store/extensions'
-import { useModels } from '../store/models'
+import { hasUsableModel, useModels } from '../store/models'
 import { useTasks } from '../store/tasks'
 import { useI18n } from '../i18n/i18n'
 import { useDialog } from '../components/DialogProvider'
@@ -2793,6 +2794,9 @@ function Conversation({
 }): React.JSX.Element {
   const { t, locale } = useI18n()
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 一个可用模型都没有（首次安装的常态）→ 对话区显示「接入模型」引导卡；须等配置载入，否则启动瞬间误判。
+  const { providers: modelProviders, ready: modelsReady } = useModels()
+  const needModelSetup = modelsReady && !hasUsableModel(modelProviders)
 
   // 是否「贴住底部」：决定流式新内容是否自动跟随。用户上滚离开底部即脱离跟随，回到底部（或点「回到最新」）
   // 恢复跟随。ref 供滚动副作用同步读取（避免闭包过期、其变化不触发副作用重跑），state 仅驱动浮标显隐。
@@ -3072,9 +3076,12 @@ function Conversation({
         >
           <div className={`cf-msgs__inner${selecting ? ' is-selecting' : ''}`}>
             {messages.length === 0 ? (
-              <div className="cf-empty">
-                {owner ? (owner.desc ? `${owner.name} · ${owner.desc}` : owner.name) : ''}
-              </div>
+              <>
+                <div className="cf-empty">
+                  {owner ? (owner.desc ? `${owner.name} · ${owner.desc}` : owner.name) : ''}
+                </div>
+                {needModelSetup && <ModelSetupCard />}
+              </>
             ) : selecting ? (
               // 选择态：按「轮」分组，每轮一张可勾选卡片；前言（turn<0）原样呈现、不可选。
               groupTurns(messages).map((g) => {
@@ -3113,6 +3120,8 @@ function Conversation({
                     onStop={onStop}
                   />
                 )}
+                {/* 已有对话但模型被删光：引导卡接在末尾（不进对话记录）。 */}
+                {needModelSetup && !streaming && <ModelSetupCard />}
               </>
             )}
           </div>

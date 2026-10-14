@@ -12,7 +12,8 @@ import {
   RotateCcw,
   AlertTriangle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Pencil
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import { useModels } from '../../store/models'
@@ -68,6 +69,7 @@ export function ModelSettings(): React.JSX.Element {
   // 输入防抖计时器：边打字边落盘，失焦/回车时立即冲刷
   const keyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [nameDraft, setNameDraft] = useState('')
+  const nameInputRef = useRef<HTMLInputElement>(null)
   // 「供应商」下拉的当前选择（仅自定义详情用；套用官方预置的便捷入口，不持久化）
   const [presetSel, setPresetSel] = useState('')
   const [fetchState, setFetchState] = useState<{ status: FetchStatus; list: string[] }>({
@@ -379,17 +381,34 @@ export function ModelSettings(): React.JSX.Element {
           </div>
           <header className="provider-detail__head">
             {selectedProvider.kind === 'custom' ? (
-              <input
-                className="provider-detail__name-input"
-                size={1}
-                value={nameDraft}
-                placeholder={t('models.providerNamePlaceholder')}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={commitName}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                }}
-              />
+              // 名称就地可改：常驻铅笔图标提示可编辑（点名称或铅笔都进入编辑），悬停显边框。
+              <span className="provider-detail__name-edit">
+                <input
+                  ref={nameInputRef}
+                  className="provider-detail__name-input"
+                  size={1}
+                  value={nameDraft}
+                  title={t('models.renameHint')}
+                  placeholder={t('models.providerNamePlaceholder')}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={commitName}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                />
+                <button
+                  type="button"
+                  className="icon-btn provider-detail__name-pen"
+                  title={t('models.renameHint')}
+                  aria-label={t('models.renameHint')}
+                  onClick={() => {
+                    nameInputRef.current?.focus()
+                    nameInputRef.current?.select()
+                  }}
+                >
+                  <Pencil size={14} />
+                </button>
+              </span>
             ) : (
               <h2 className="provider-detail__name">{selectedProvider.name}</h2>
             )}
