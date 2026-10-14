@@ -1393,6 +1393,11 @@ body.cf-resizing-y * {
   white-space: nowrap;
 }
 
+/* 底部工作状态指示器（思考中/生成回答/等待作答…）：跳过头像列，与消息正文左缘对齐（同 .cf-msg 的 32px 头像 + 列间距） */
+.cf-msgs__inner > .chat__status {
+  margin-left: calc(32px + var(--space-3));
+}
+
 /* 工具调用条（内联、默认收起） */
 .cf-tools {
   margin-top: var(--space-2);
