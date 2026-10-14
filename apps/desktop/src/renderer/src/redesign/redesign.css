@@ -1366,6 +1366,33 @@ body.cf-resizing-y * {
   order: 2;
 }
 
+/* 后台任务通知：后台子智能体结束后自动起的那一轮的起点，居中一行系统通知（不是用户说的话） */
+.cf-msg.is-notify {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+.cf-notify {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-inset);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.cf-notify svg {
+  flex: none;
+  color: var(--accent);
+}
+.cf-notify span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 工具调用条（内联、默认收起） */
 .cf-tools {
   margin-top: var(--space-2);

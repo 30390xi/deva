@@ -98,6 +98,12 @@ export interface StoredSession {
    */
   summaries?: Record<string, string>
   /**
+   * 后台子智能体（run_in_background）的状态边车，按开出它的 run_subagent / send_to_subagent 调用 id 记录。
+   * 历史里那条调用的 tool_result 只是「已在后台启动」，真正的结局在回合之外才揭晓，故 Task 卡的终态记在这里：
+   * running=派出时写入（进程退出后仍是 running 即视为被中断），ok / error=结束时改写。按轮删除时随 tool_use 修剪。
+   */
+  background?: Record<string, 'running' | 'ok' | 'error'>
+  /**
    * @deprecated 已废弃的「项目分桶键」（旧 IDE 式外壳遗留）。对话优先外壳无项目概念、`listSessions` 列全部，
    * 故此字段不再读写；仅为兼容历史 JSON 保留可选声明（读时忽略、新存不产生）。见文件头注释。
    */

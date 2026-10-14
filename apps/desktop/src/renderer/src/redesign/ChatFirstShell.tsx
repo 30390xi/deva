@@ -264,7 +264,8 @@ export function ChatFirstShell(): React.JSX.Element {
     mountFocus,
     respondAsk,
     respondPlan,
-    respondMount
+    respondMount,
+    stopSubagent
   } = useChat()
   const { personas, remove, reorderPersonas } = useExtensions()
   const { t, locale } = useI18n()
@@ -551,6 +552,7 @@ export function ChatFirstShell(): React.JSX.Element {
                 onMountReq={respondMount}
                 onOpenProposal={openProposal}
                 onOpenAutotask={openAutotask}
+                onStopSubagent={stopSubagent}
                 onDeleteTurns={deleteTurnsWithConfirm}
                 attention={sessionStates[currentSessionId]?.attention ?? false}
                 prefill={composerPrefill}
@@ -2752,6 +2754,7 @@ function Conversation({
   onMountReq,
   onOpenProposal,
   onOpenAutotask,
+  onStopSubagent,
   onDeleteTurns,
   attention,
   prefill,
@@ -2775,6 +2778,8 @@ function Conversation({
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   /** created 态定时任务名片「打开任务会话」。 */
   onOpenAutotask: (taskId: string) => void
+  /** 停止一个后台运行的子智能体（Task 卡上的停止键）。 */
+  onStopSubagent: (toolId: string) => void
   /** 按「轮」删除选中轮次（含破坏性确认）；返回是否已删（true=退出选择态并清空选择）。 */
   onDeleteTurns: (turnIndices: number[]) => Promise<boolean>
   /** 当前会话有待用户处理的卡片（问答 / 计划 / 挂载请求）：此时不开回滚面板。 */
@@ -3039,6 +3044,7 @@ function Conversation({
       onMountReq={onMountReq}
       onOpenProposal={onOpenProposal}
       onOpenAutotask={onOpenAutotask}
+      onStopSubagent={onStopSubagent}
     />
   )
 
@@ -3366,7 +3372,8 @@ function ConvMessage({
   onPlan,
   onMountReq,
   onOpenProposal,
-  onOpenAutotask
+  onOpenAutotask,
+  onStopSubagent
 }: {
   msg: ChatMessage
   owner?: Persona
@@ -3378,8 +3385,22 @@ function ConvMessage({
   onMountReq: (key: string, path: string | null) => void
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   onOpenAutotask: (taskId: string) => void
+  onStopSubagent: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
+  // 后台任务通知（后台子智能体结束后自动起的那一轮的起点）：一行居中的系统通知，不画成用户气泡。
+  // 仍保留 is-user + data-turn：它是一轮的起点，右键删轮 / 跳转定位都靠它。
+  if (msg.role === 'user' && msg.notify) {
+    const text = msg.blocks.map((b) => (b.kind === 'text' ? b.text : '')).join('')
+    return (
+      <div className="cf-msg is-user is-notify" data-turn={dataTurn}>
+        <div className="cf-notify">
+          <Bot size={13} />
+          <span>{text || t('chat.subagent.notify')}</span>
+        </div>
+      </div>
+    )
+  }
   if (msg.role === 'user') {
     const text = msg.blocks.map((b) => (b.kind === 'text' ? b.text : '')).join('')
     return (
@@ -3423,6 +3444,7 @@ function ConvMessage({
                 onMountReq={onMountReq}
                 onOpenProposal={onOpenProposal}
                 onOpenAutotask={onOpenAutotask}
+                onStopSubagent={onStopSubagent}
               />
             )
           )}

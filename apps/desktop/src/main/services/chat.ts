@@ -94,9 +94,11 @@ import {
   compactSession,
   isAutoNudge,
   isCompactionSummary,
+  isTaskNotification,
   lastTurnStart,
   needsCompaction,
   needsCompactionMidTurn,
+  NOTIFY_MARKER,
   stripMarker,
   type CompactModelConfig,
   type CompactStatus
@@ -105,7 +107,7 @@ import {
 /**
  * 会话编排（Agent 主循环）。
  * 流式生成 → 收集工具调用 → 过权限闸门 → 执行 → 结果回灌 → 继续，直至模型不再调用工具
- * （主轮不设步数上限，对标 Claude Code 的 agentic loop；子轮保留安全上限，见 runAgentLoop 调用处）。
+ * （主轮与子智能体都不设步数上限，对标 Claude Code 的 agentic loop；仅定时任务另设上限）。
  * 对话历史只存主进程（sessions），渲染层仅发新用户文本；工具/密钥/文件访问都在主进程内闭环。
  */
 
@@ -258,7 +260,8 @@ function normalizeAutotaskDraft(input: unknown): AutotaskDraft {
 /** 重建历史用的展示消息（主进程从 provider Message[] 归约，去掉 base64 负载）。 */
 type DisplayBlock =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error'; summary?: string }
+  /** status=running 仅见于仍在后台运行的子智能体 Task 卡（见 backgroundSubagents）。 */
+  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error' | 'running'; summary?: string }
   /**
    * 弱化提示气泡：compacted=较早历史已压缩（由 messages 里的摘要标记还原）；
    * truncated=达输出上限被截断 / empty=通篇无回复 / restored=仅回滚了代码 / aborted=用户中止了本轮
@@ -303,7 +306,13 @@ type DisplayBlock =
   | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 
 export type DisplayMessage =
-  | { role: 'user'; text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] }
+  | {
+      role: 'user'
+      text: string
+      attachments: { name: string; kind: 'image' | 'document' | 'text' }[]
+      /** 后台任务通知（见 NOTIFY_MARKER）：展示为一行系统通知而非用户气泡，text 为其标题。 */
+      notify?: true
+    }
   | { role: 'assistant'; blocks: DisplayBlock[] }
 
 /** StoredNotice → 展示块（错误红框 / 弱化提示）。 */
@@ -329,7 +338,8 @@ function toDisplayMessages(
   autotasks: Record<string, { status: 'created' | 'dismissed'; taskId?: string }> = {},
   todos: TodoEntry[] = [],
   /** 子智能体 id → 类型与任务标题（来自子智能体记录索引），给续聊卡补标题。 */
-  subagentLookup?: (id: string) => { agent: string; description: string } | undefined
+  subagentLookup?: (id: string) => { agent: string; description: string } | undefined,
+  background: Record<string, 'running' | 'ok' | 'error'> = {}
 ): DisplayMessage[] {
   const out: DisplayMessage[] = []
   let lastAssistant: Extract<DisplayMessage, { role: 'assistant' }> | null = null
@@ -480,6 +490,13 @@ function toDisplayMessages(
     // 其后的助手续写并入同一个气泡，看起来就是一次连贯的回复。
     if (isAutoNudge(m)) return
 
+    // 后台任务通知：一轮的起点（与 isTurnStart 同义，轮下标照常对齐），展示为一行系统通知（取标记后的首行）。
+    if (isTaskNotification(m) && typeof m.content === 'string') {
+      out.push({ role: 'user', text: noticeHeadline(m.content), attachments: [], notify: true })
+      lastAssistant = null
+      return
+    }
+
     if (typeof m.content === 'string') {
       out.push({ role: 'user', text: m.content, attachments: [] })
       // 真实用户轮：断开 assistant 合并链，其后的 assistant 段另起新气泡（新头像）。
@@ -495,7 +512,16 @@ function toDisplayMessages(
           const b = lastAssistant.blocks.find(
             (x): x is Extract<DisplayBlock, { kind: 'tool' }> => x.kind === 'tool' && x.id === p.toolUseId
           )
-          if (b) b.status = p.isError ? 'error' : 'ok'
+          if (!b) continue
+          b.status = p.isError ? 'error' : 'ok'
+          // 后台子智能体：这条结果只是「已在后台启动」，Task 卡的真实状态看运行表与 background 边车。
+          const bg = background[b.id]
+          if (backgroundSubagents.has(b.id)) b.status = 'running'
+          else if (bg === 'running') {
+            // 边车停在 running 却已不在运行：派出后应用退出过（或回滚撤销复活了被中止的那次派发），它没能跑完。
+            b.status = 'error'
+            b.summary = '后台运行已中断'
+          } else if (bg) b.status = bg
         }
       }
       return
@@ -587,6 +613,8 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
     s.todoCancelNote = undefined
     // 检查点记录同样按 toolUseId 归属，随轮一并清空（lastKnown / baselines 描述的是磁盘现状，保留）。
     s.checkpoints = {}
+    s.background = {}
+    cancelBackground(s.id)
     pruneSubagents(s.id, new Set())
     s.updatedAt = Date.now()
     return
@@ -642,7 +670,10 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
   s.autotasks = prune(s.autotasks)
   // 被删轮的检查点记录随之丢弃：它们的文件改动留在磁盘上，此后不再能经回滚撤回。
   s.checkpoints = prune(s.checkpoints)
-  // 创建或续聊发生在被删轮次的子智能体整条删除：删掉的内容模型不再看到，子智能体的上下文里也不该留着。
+  s.background = prune(s.background)
+  // 派发在被删轮次里、仍在后台跑的子智能体就地中止（不再通知）；创建或续聊发生在被删轮次的子智能体整条删除：
+  // 删掉的内容模型不再看到，子智能体的上下文里也不该留着。
+  cancelBackground(s.id, liveUseIds)
   pruneSubagents(s.id, liveUseIds)
   s.updatedAt = Date.now()
 }
@@ -868,6 +899,7 @@ export type ChatStreamEvent =
    * depth>0 + agent + parent：本事件来自某子智能体（渲染层据此折叠进 parent 指向的那张
    * 「子智能体任务」卡）。parent = 派生它的那次 run_subagent 调用 id —— 多个子智能体**并行**跑时，
    * 唯有按 id 归属才不会把彼此的嵌套事件串进同一张卡。
+   * bg：来自后台运行的子智能体，不属于任何回合（turnId 为空串），Task 卡可能在任意一条历史消息里。
    */
   | {
       type: 'tool_call'
@@ -877,6 +909,7 @@ export type ChatStreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      bg?: true
     }
   | {
       type: 'tool_result'
@@ -888,6 +921,8 @@ export type ChatStreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      /** 后台子智能体：嵌套结果，或（depth 0）它结束时给自己那张 Task 卡定格的壳结果。 */
+      bg?: true
     }
   /** 征求决策/澄清：暂停循环，向用户抛出一个或多个问题，等其一次性作答后回灌为 tool_result。 */
   | { type: 'ask_user'; key: string; questions: AskQuestion[] }
@@ -952,19 +987,17 @@ export type ChatStreamEvent =
    * 回合开始（总是本轮第一个事件）：带上本轮的用户消息。桌面、手机端、定时任务发起的回合都发——
    * 各端据此把「别处发起的一轮」当本地回合呈现（用户气泡 + 流式 + 可停止）；自己发起的按 turnId 认出并跳过。
    */
-  | { type: 'turn_start'; user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] } }
+  | {
+      type: 'turn_start'
+      /** notify：本轮由后台任务通知自动发起（见 NOTIFY_MARKER），text 为通知标题。 */
+      user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[]; notify?: true }
+    }
   | { type: 'done'; stopReason: StopReason }
 
-// 主对话单轮工具步数上限：Infinity = 不设上限，一直循环到模型不再调用工具为止（对标 Claude Code 的
-// agentic loop）。天然刹车 = 用户随时可中止（controller.signal，见 runAgentLoop 内的 aborted 判定）
-// + 接近上下文上限时自动压缩（compaction）。子智能体不吃此值，另有自己的安全上限（见 run_subagent）。
+// 主对话与子智能体的单轮工具步数上限：Infinity = 不设上限，一直循环到模型不再调用工具为止（对标
+// Claude Code 的 agentic loop）。天然刹车 = 用户随时可中止（主轮的停止键；后台子智能体在其 Task 卡上
+// 单独停止）+ 主轮接近上下文上限时自动压缩（compaction）。仅定时任务的密封执行另设上限。
 const MAX_STEPS = Infinity
-/**
- * 子智能体单次派发的工具步数上限。主轮无上限（MAX_STEPS = Infinity），子轮保留一个**很宽的**
- * 兜底：它跑在无人值守的隔离循环里，没有 ask_user 可以打断自己，需要一道防失控的闸。
- * 60 步对「大范围检索 / 专项分析」这类目标用途实际等同于无上限（原先的 15 步才是真正的瓶颈）。
- */
-const SUBAGENT_MAX_STEPS = 60
 /**
  * 单个步骤因可重试错误（断网 / 空闲僵死 / 429 / 5xx）自动重连的最大次数。退避 1s→2s→4s… 封顶
  * RECONNECT_MAX_DELAY_MS，服务端给了 retry-after 则以它为准（同样封顶）。合计约 1.5 分钟的耐心，
@@ -1098,6 +1131,80 @@ const mountDeclined = new Set<string>()
 const busySessions = new Map<string, string>()
 
 /**
+ * 后台运行中的子智能体（run_in_background），键 = 开出它的 run_subagent / send_to_subagent 调用 id（即其
+ * Task 卡 id）。它们不属于任何回合：有自己的取消控制器，派发它的那一轮结束或被中止都不影响它；跑完后把结论
+ * 作为通知交给主智能体（见 registerChatIpc 内的 launchBackgroundSubagent / wakeForNotices）。
+ */
+interface BackgroundSubagent {
+  sessionId: string
+  /** 子智能体 id（sub-xxxxxxxx）。 */
+  subagentId: string
+  controller: AbortController
+  /** 所在轮次 / 会话被删而中止：派发它的那次调用已不在上下文里，结束时不再通知、不写边车。 */
+  silent: boolean
+  /** 用户在 Task 卡上停止了它：结论照常交给模型，但不为此自动起一轮（随下一轮带过去）。 */
+  stoppedByUser: boolean
+}
+const backgroundSubagents = new Map<string, BackgroundSubagent>()
+
+/**
+ * 待交给主智能体的后台任务通知（键 = sessionId，按到达先后）。投递时机，先到先得：
+ *  · 该会话正有一轮在跑 → 下一步请求前随工具结果一并带上；
+ *  · 会话空闲且 wake → 立即自动起一轮（消息以 NOTIFY_MARKER 开头）；
+ *  · 都不满足（用户停止的 / 起不了轮）→ 随用户下一条消息带上。
+ */
+interface PendingNotice {
+  /** 对应的 Task 卡 id：所在轮次被删时据此撤回。 */
+  toolUseId: string
+  /** 展示用一句话标题（自动起轮时作通知行的文案）。 */
+  headline: string
+  /** 交给模型的通知正文。 */
+  body: string
+  /** 会话空闲时是否为它自动起一轮。 */
+  wake: boolean
+  /** 派发时的模型：自动起轮时本对话模型解析不了就用它。 */
+  model: ChatModelConfig
+}
+const pendingNotices = new Map<string, PendingNotice[]>()
+
+/**
+ * 中止某会话的后台子智能体（keep 中的调用 id 除外），一律按 silent 处理。用于删会话 / 清空 / 按轮删除 /
+ * 回滚：派发它的调用已不在上下文里，它的结论也就无处可交。连同已排队、尚未投递的通知一并撤回。
+ */
+function cancelBackground(sessionId: string, keep?: Set<string>): void {
+  for (const [id, b] of backgroundSubagents)
+    if (b.sessionId === sessionId && !keep?.has(id)) {
+      b.silent = true
+      b.controller.abort()
+    }
+  const queue = pendingNotices.get(sessionId)
+  if (!queue) return
+  const left = keep ? queue.filter((n) => keep.has(n.toolUseId)) : []
+  if (left.length) pendingNotices.set(sessionId, left)
+  else pendingNotices.delete(sessionId)
+}
+
+/** 取走某会话全部待投递的通知，拼成交给模型的一段文本（没有则 null）。 */
+function takeNotices(sessionId: string): string | null {
+  const queue = pendingNotices.get(sessionId)
+  if (!queue?.length) return null
+  pendingNotices.delete(sessionId)
+  return noticeText(queue)
+}
+
+function noticeText(queue: PendingNotice[]): string {
+  return (
+    queue.map((n) => n.body).join('\n\n') +
+    '\n\n（以上是系统自动发送的后台任务通知，不是用户发来的消息。请据此继续推进原来的任务；结论里对用户要紧的部分，记得转述给用户。）'
+  )
+}
+
+/** 通知消息（NOTIFY_MARKER 开头）的展示标题：标记之后的首行。 */
+function noticeHeadline(content: string): string {
+  return content.slice(NOTIFY_MARKER.length).split('\n')[0].trim()
+}
+
+/**
  * 把待决的问答 / 计划审阅 / 挂载请求一律按「取消」解开：给了 turnId 只解该轮的，缺省解全部。
  * 否则被中止的回合会一直阻塞在 askUser / reviewPlan / requestMount 上，永远走不到收尾落盘。
  */
@@ -1121,10 +1228,13 @@ function releasePending(turnId?: string): void {
     }
 }
 
-/** 是否有进行中的回合（对话 / 定时任务 / 手动压缩）。 */
+/** 是否有进行中的回合（对话 / 定时任务 / 手动压缩）或后台运行中的子智能体。 */
 export function hasActiveTurns(): boolean {
-  return activeTurns.size > 0 || busySessions.size > 0
+  return activeTurns.size > 0 || busySessions.size > 0 || backgroundSubagents.size > 0
 }
+
+/** 应用正在退出：不再为后台任务通知自动起轮。 */
+let shuttingDown = false
 
 /**
  * 退出应用前调用：中止全部进行中的回合并等它们走完收尾（补齐工具结果、记「已中止」、落盘），
@@ -1133,7 +1243,13 @@ export function hasActiveTurns(): boolean {
  */
 export async function settleActiveTurns(timeoutMs: number): Promise<void> {
   if (!hasActiveTurns()) return
+  shuttingDown = true
   for (const c of activeTurns.values()) c.abort()
+  // 后台子智能体同样中止并落盘它的记录；按 silent 处理：退出途中不该再为它起一轮。
+  for (const b of backgroundSubagents.values()) {
+    b.silent = true
+    b.controller.abort()
+  }
   releasePending()
   const deadline = Date.now() + timeoutMs
   while (hasActiveTurns() && Date.now() < deadline)
@@ -1152,6 +1268,7 @@ interface RewindUndo {
     proposals: StoredSession['proposals']
     asks: StoredSession['asks']
     summaries: StoredSession['summaries']
+    background: StoredSession['background']
     plans: StoredSession['plans']
     autotasks: StoredSession['autotasks']
     todos: StoredSession['todos']
@@ -1372,6 +1489,7 @@ function buildSubagentTool(): ToolSpec {
       '除 fork 外，子智能体看不到主对话，prompt 要写清背景、目标和期望的回报形式；派 Explore 时在 prompt 里说明检索力度（「中等」或「非常彻底」）。' +
       '子智能体的结论不会直接显示给用户，把要紧的部分转述给用户。' +
       '结论末尾附有子智能体 ID：用 send_to_subagent 给它发消息，它会在保留原有上下文的基础上继续；再次调用 run_subagent 则是全新开始。' +
+      '前台还是后台：需要它的结论才能往下做时用前台（默认），调用会等它跑完再返回；手头确有不依赖其结论、可以同时推进的工作时，设 run_in_background 让它在后台跑——调用立即返回，它结束后系统会自动通知你。后台运行期间不要轮询、等待或去查它的进度，接着做别的事或先回复用户。' +
       `可用的子智能体：${list}。省略 agent 即通用子智能体 ${GENERAL_SUBAGENT.name}。`,
     inputSchema: {
       type: 'object',
@@ -1388,6 +1506,10 @@ function buildSubagentTool(): ToolSpec {
         prompt: {
           type: 'string',
           description: '交给子智能体的任务描述（fork 之外它看不到主对话，背景要写全）。'
+        },
+        run_in_background: {
+          type: 'boolean',
+          description: '可选。设为 true 在后台运行：立即返回，结束后自动通知你。省略即前台运行、等它的结论。'
         }
       },
       required: ['description', 'prompt']
@@ -1404,7 +1526,8 @@ function buildSendToSubagentTool(): ToolSpec {
     name: 'send_to_subagent',
     description:
       '给之前用 run_subagent 派出的子智能体发一条消息，让它在保留原有上下文的基础上继续工作（追问、补充要求、让它接着做），返回它这一次的结论。' +
-      '同一个子智能体同一时间只能处理一条消息。它的结论同样不会直接显示给用户，要紧的部分请转述。',
+      '同一个子智能体同一时间只能处理一条消息（在后台跑着的也算）。它的结论同样不会直接显示给用户，要紧的部分请转述。' +
+      '与 run_subagent 一样可设 run_in_background 让这次在后台跑，结束后自动通知你。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1419,6 +1542,10 @@ function buildSendToSubagentTool(): ToolSpec {
         description: {
           type: 'string',
           description: '可选。用 3-5 个字概括这次要它做的事，作为任务卡标题；省略则沿用原任务标题。'
+        },
+        run_in_background: {
+          type: 'boolean',
+          description: '可选。设为 true 在后台运行：立即返回，结束后自动通知你。省略即前台运行、等它的结论。'
         }
       },
       required: ['to', 'message']
@@ -1619,7 +1746,7 @@ interface AgentLoopArgs {
   ctx: ToolContext
   /** 取消控制器：其 signal 贯穿流式与工具执行。 */
   controller: AbortController
-  /** 单轮最大工具步数（主轮 MAX_STEPS=Infinity，子轮 SUBAGENT_MAX_STEPS）。 */
+  /** 单轮最大工具步数（主轮与子轮 MAX_STEPS=Infinity，定时任务另设上限）。 */
   maxSteps: number
   /** 递归深度：0=主轮，1=子智能体（限制再派生；Phase 4 用）。 */
   depth: number
@@ -1642,6 +1769,16 @@ interface AgentLoopArgs {
    * 渲染层据此把嵌套事件归入**正确的那张** Task 卡——并行派发时这是唯一可靠依据。
    */
   parentToolId?: string
+  /**
+   * 后台运行的子智能体（run_in_background）：其事件盖上 bg 戳、以空 turnId 发出——它不属于任何回合，
+   * 渲染层据此按 parent 在全部消息里找那张 Task 卡，而不是拼进当前流式的那条气泡。
+   */
+  background?: boolean
+  /**
+   * 取走本会话待投递的后台任务通知（见 pendingNotices）：每步工具结果回灌前调用，有则作为一段文本附在
+   * 工具结果之后，模型下一步即可看到。仅主轮传入。
+   */
+  takeNotices?: () => string | null
   /**
    * 每收到一次真实用量即回调（主轮据此持久化 lastInputTokens 作压缩触发依据）。
    * input 为**总提示 token**（含缓存命中/写入）；cacheRead/cacheWrite 仅供观测，不参与任何判定。
@@ -1682,7 +1819,7 @@ interface AgentLoopArgs {
    * 一轮进行中的上下文压缩（对标 Claude Code：每次请求模型前都检查，长任务跑到一半也会自动压，
    * 不必等到下一轮开头——一轮里连跑几十步工具，那时早已撑爆窗口）。循环从第 2 步起、每步请求前
    * 判定接近窗口即调用；实现方须**就地**改写 history（不得重新赋值），返回是否真的压缩了。
-   * 仅主轮与定时任务传入；子轮历史是隔离的临时数组，且有步数上限。
+   * 仅主轮与定时任务传入；子轮历史是隔离的临时数组，不做压缩（上下文撑满时以出错收场，结论照常交回）。
    */
   compact?: () => Promise<boolean>
 }
@@ -1714,6 +1851,58 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   function emitTurnStart(turnId: string, sessionId: string, history: Message[]): void {
     const [user] = toDisplayMessages(history.slice(-1))
     if (user?.role === 'user') emit(turnId, sessionId, { type: 'turn_start', user })
+  }
+
+  /** 正在手动压缩（/compact）的会话：期间不为后台任务通知起轮，免得与压缩同时改写 messages。 */
+  const compacting = new Set<string>()
+
+  /** 后台子智能体 Task 卡的状态落边车（background + summaries），重开对话时据此还原。 */
+  function setBackgroundState(
+    sessionId: string,
+    toolUseId: string,
+    state: 'running' | 'ok' | 'error',
+    summary: string
+  ): void {
+    const s = getSession(sessionId)
+    if (!s) return
+    s.background = { ...s.background, [toolUseId]: state }
+    s.summaries = { ...s.summaries, [toolUseId]: summary }
+    saveProject(sessionId)
+  }
+
+  function enqueueNotice(sessionId: string, n: PendingNotice): void {
+    const queue = pendingNotices.get(sessionId)
+    if (queue) queue.push(n)
+    else pendingNotices.set(sessionId, [n])
+    wakeForNotices(sessionId)
+  }
+
+  /**
+   * 会话空闲且队列里有要唤醒的通知 → 自动起一轮（对标 Claude Code 的 task-notification）：全部排队的通知
+   * 合成一条 NOTIFY_MARKER 开头的 user 消息（展示为一行系统通知），主智能体据此接着干。会话忙时什么都不做：
+   * 回合会在下一步带上通知、结束时再调本函数；手动压缩 / 回滚结束时同样会再调一次。
+   */
+  function wakeForNotices(sessionId: string): void {
+    if (shuttingDown) return
+    const queue = pendingNotices.get(sessionId)
+    if (!queue?.some((n) => n.wake)) return
+    if (busySessions.has(sessionId) || compacting.has(sessionId) || rewinding.has(sessionId)) return
+    pendingNotices.delete(sessionId)
+    const session = getSession(sessionId)
+    if (!session) return
+    repairDanglingToolUses(session)
+    session.messages.push({
+      role: 'user',
+      content: `${NOTIFY_MARKER}${queue.map((n) => n.headline).join('；')}\n${noticeText(queue)}`
+    })
+    // 新消息落进历史后，撤销上次回滚会把它一并抹掉——撤销快照就此失效（同 chat:send）。
+    pendingUndo.delete(sessionId)
+    session.updatedAt = Date.now()
+    saveProject(sessionId)
+    const turnId = genId('turn')
+    emitTurnStart(turnId, sessionId, session.messages)
+    // 模型以本对话存的为准（runTurn 内解析）；解析不了才用派发时那一轮的模型。
+    void runTurn(sessionId, turnId, queue[queue.length - 1].model, null)
   }
 
   /** 抛出一个或多个问题、暂停循环等用户一次性作答（不过权限闸门，恒放行执行）。 */
@@ -1769,8 +1958,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     text: string
     stopReason: StopReason
     errorMessage?: string
-    /** 因步数上限停下时的说明（未达上限则无）。 */
-    stepLimit?: string
   }> {
     const {
       turnId,
@@ -1790,10 +1977,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       agentName,
       parentToolId
     } = args
-    // depth>0 时给 tool_call/tool_result 事件盖上「来自哪个子智能体、归属哪张卡」的戳；
+    // depth>0 时给 tool_call/tool_result 事件盖上「来自哪个子智能体、归属哪张卡」的戳（后台运行的再加 bg）；
     // 主轮（depth 0）为 undefined，事件形状与既有完全一致（向后兼容）。
-    const evMeta: { depth: number; agent?: string; parent?: string } | undefined =
-      depth > 0 ? { depth, agent: agentName, parent: parentToolId } : undefined
+    const evMeta: { depth: number; agent?: string; parent?: string; bg?: true } | undefined =
+      depth > 0
+        ? { depth, agent: agentName, parent: parentToolId, ...(args.background ? { bg: true as const } : {}) }
+        : undefined
     // 子智能体运行在隔离上下文里，其正文/思考/用量/重连等**流式噪声一律不进主对话流**
     // （对标 Claude Code：Task 卡之外看不到子智能体的过程），只有工具调用（盖了 evMeta 戳，
     // 折叠进卡）与最终结论回到父轮。并行派发后这更是必须的——否则多个子智能体的正文会互相交织。
@@ -1867,7 +2056,13 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           error: `子智能体 ${to} 已不可用（已被清理、所在轮次被删除，或 ID 有误），请用 run_subagent 重新派发。`
         }
       if (isSubagentBusy(sessionId, to))
-        return { label, note: '', error: `子智能体 ${to} 正在处理另一条消息，请等它完成后再发。` }
+        return {
+          label,
+          note: '',
+          error: [...backgroundSubagents.values()].some((b) => b.sessionId === sessionId && b.subagentId === to)
+            ? `子智能体 ${to} 正在后台运行，结束后会自动通知你；请等通知到了再给它发消息。`
+            : `子智能体 ${to} 正在处理另一条消息，请等它完成后再发。`
+        }
       closeDanglingTail(rec.messages)
       const moved = rec.workspaceRoot !== ctx.workspaceRoot
       rec.messages.push({
@@ -1885,24 +2080,26 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
      * 在子智能体记录自己的历史上跑一次 runAgentLoop（新派出与续聊共用），把结果映射成交回父轮的结论。
      * 派生本身不设闸——子智能体的每一次嵌套工具调用仍在其 runAgentLoop 内照常过同一道闸门（无后门）。
      * 递归深度上限 1：子轮 allowSubagents=false，杜绝子派生子。结束后（含中止 / 出错）落盘并解除忙状态。
+     * bg：后台运行——用它自己的取消控制器（不随本轮中止），事件以空 turnId 发出并盖 bg 戳。
      */
     async function runSubagentLoop(
       rec: SubagentRecord,
-      tc: { id: string }
+      tc: { id: string },
+      bg?: AbortController
     ): Promise<{ conclusion: string; isErr: boolean; aborted: boolean }> {
       const label = rec.agent
       try {
         const sub = await runAgentLoop({
-          turnId,
+          turnId: bg ? '' : turnId,
           sessionId,
           history: rec.messages,
           system: rec.system,
           tools: rec.tools,
           // 子智能体恒跟随主对话（继承本轮模型）。
           model,
-          ctx,
-          controller,
-          maxSteps: SUBAGENT_MAX_STEPS,
+          ctx: bg ? { workspaceRoot: ctx.workspaceRoot, signal: bg.signal } : ctx,
+          controller: bg ?? controller,
+          maxSteps: MAX_STEPS,
           depth: depth + 1,
           // 子智能体仍在用户在场时运行，其每次工具调用照常过交互权限闸门。
           interactive: true,
@@ -1912,23 +2109,21 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           agentName: label,
           // 嵌套事件据此归入**本次调用**开出的那张 Task 卡（并行时唯一可靠依据）。
           parentToolId: tc.id,
+          background: !!bg,
           // 子轮写入归到本次调用的 id（见执行点 owner），随父轮一起回滚。
           recorder: args.recorder
         })
         const aborted = sub.stopReason === 'aborted'
-        const isErr = sub.stopReason === 'error' || aborted || !!sub.stepLimit
+        const isErr = sub.stopReason === 'error' || aborted
         const partial = sub.text.trim()
-        // 中止 / 步数用尽时的 text 只是半截过程输出，不能当成结论交给模型——明确标注「未完成」，
+        // 中止时的 text 只是半截过程输出，不能当成结论交给模型——明确标注「未完成」，
         // 免得下一轮模型把它当作子任务的正式结果继续推进。
         const conclusion = aborted
           ? `子智能体「${label}」被用户中止，未完成。` + (partial ? `\n中止前的最近输出：\n${partial}` : '')
-          : sub.stepLimit
-            ? `子智能体「${label}」未完成：${sub.stepLimit}` +
-              (partial ? `\n停止前的最近输出：\n${partial}` : '')
-            : partial ||
-              (isErr && sub.errorMessage
-                ? `子智能体「${label}」执行失败：${sub.errorMessage}`
-                : '（子智能体未产生文本结论。）')
+          : partial ||
+            (isErr && sub.errorMessage
+              ? `子智能体「${label}」执行失败：${sub.errorMessage}`
+              : '（子智能体未产生文本结论。）')
         return { conclusion, isErr, aborted }
       } catch (e) {
         return {
@@ -1956,6 +2151,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       const prep =
         tc.name === 'send_to_subagent' ? prepareContinueSubagent(tc) : prepareNewSubagent(tc)
       const label = prep.label
+      if (prep.rec && (tc.args as { run_in_background?: unknown } | null)?.run_in_background === true)
+        return launchBackgroundSubagent(tc, prep.rec, prep.note)
       let conclusion: string
       let isErr = true
       let aborted = false
@@ -1990,6 +2187,80 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         ...(evMeta ?? {})
       })
       return { conclusion, isErr }
+    }
+
+    /**
+     * 后台派出（run_in_background）：子智能体在自己的取消控制器下开跑，本次调用立即带着「已在后台启动」交回
+     * 父轮；Task 卡保持运行中，嵌套事件照常收进卡里。它结束时定格 Task 卡、写边车，并把结论排进通知队列——
+     * 主智能体正忙就在下一步带上，空闲就自动起一轮（见 wakeForNotices）。
+     */
+    function launchBackgroundSubagent(
+      tc: { id: string; name: string; args: unknown },
+      rec: SubagentRecord,
+      note: string
+    ): { conclusion: string; isErr: boolean } {
+      const label = rec.agent
+      const own = (tc.args as { description?: unknown } | null)?.description
+      const title = (typeof own === 'string' && own.trim()) || rec.description || label
+      const bg = new AbortController()
+      const entry: BackgroundSubagent = {
+        sessionId,
+        subagentId: rec.id,
+        controller: bg,
+        silent: false,
+        stoppedByUser: false
+      }
+      setSubagentBusy(sessionId, rec.id, true)
+      backgroundSubagents.set(tc.id, entry)
+      setBackgroundState(sessionId, tc.id, 'running', `子智能体「${label}」后台运行中`)
+      void runSubagentLoop(rec, tc, bg)
+        .then((r) => {
+          backgroundSubagents.delete(tc.id)
+          if (entry.silent) {
+            // 所在轮次 / 会话已被删：它刚落盘的记录同样作废（删除那一刻它还在跑，剪枝跳过了它）。
+            // 退出途中被中止的不算，记录留着，重启后仍可续聊。
+            if (!shuttingDown) {
+              const s = getSession(sessionId)
+              if (s) pruneSubagents(sessionId, new Set(turnToolIds(s.messages).flat()))
+              else removeSessionSubagents(sessionId)
+            }
+            return
+          }
+          const stopped = entry.stoppedByUser
+          const summary = stopped
+            ? `子智能体「${label}」已停止`
+            : r.isErr
+              ? `子智能体「${label}」未完成`
+              : `子智能体「${label}」已完成`
+          setBackgroundState(sessionId, tc.id, r.isErr ? 'error' : 'ok', summary)
+          emit('', sessionId, { type: 'tool_result', id: tc.id, name: tc.name, summary, isError: r.isErr, bg: true })
+          const status = stopped ? '已被用户停止' : r.isErr ? '未完成' : '已完成'
+          enqueueNotice(sessionId, {
+            toolUseId: tc.id,
+            headline: `后台子智能体「${title}」${status}`,
+            body: [
+              '<后台子智能体通知>',
+              `子智能体：${label}（ID：${rec.id}）`,
+              `任务：${title}`,
+              `状态：${status}`,
+              '结论：',
+              r.conclusion,
+              `（用 send_to_subagent 给 ${rec.id} 发消息可让它在保留上下文的基础上继续。）`,
+              '</后台子智能体通知>'
+            ].join('\n'),
+            // 用户亲手停的：不为此自动起一轮，通知随下一轮带给模型。
+            wake: !stopped,
+            model
+          })
+        })
+        .catch((e) => console.warn('[subagents] 后台子智能体收尾失败：', e))
+      return {
+        conclusion:
+          note +
+          `子智能体「${label}」已在后台启动（ID：${rec.id}）。它结束后系统会自动通知你，届时再据结论继续；` +
+          '在此之前不要轮询、等待或查看它的进度，接着做别的事，或先回复用户。',
+        isErr: false
+      }
     }
 
     /**
@@ -2659,6 +2930,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       }
       const abortedHere = controller.signal.aborted
       if (abortedHere) await fillUnrun(toolCalls, resultParts, subRuns, 'aborted')
+      // 期间结束的后台子智能体：通知附在本步工具结果之后（tool_result 在前），模型下一步即可看到。
+      // 中止时不取，留给下一轮。
+      const notices = abortedHere ? null : (args.takeNotices?.() ?? null)
+      if (notices) resultParts.push({ type: 'text', text: notices })
       history.push({ role: 'user', content: resultParts })
       args.onStep?.()
       if (abortedHere) return { text: finalText, stopReason: 'aborted' }
@@ -2666,11 +2941,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       if (truncatedStreak >= MAX_TRUNCATED_STREAK) return { text: finalText, stopReason: 'max_tokens' }
     }
 
-    // 达到步数上限。子轮不发 error 事件：它会在主对话里画一个不落盘的红框（重开即消失），
-    // 改由父轮把 stepLimit 写进 Task 卡摘要与结论（随 summaries 边车 / tool_result 落盘）。
+    // 达到步数上限（只有定时任务设了有限上限；主轮与子智能体为 Infinity，走不到这里）。
     const stepLimit = `已达到单轮最大工具步数（${maxSteps}），已停止。`
-    if (!isSub) emit(turnId, sessionId, { type: 'error', kind: 'server', message: stepLimit })
-    return { text: finalText, stopReason: 'end_turn', stepLimit }
+    emit(turnId, sessionId, { type: 'error', kind: 'server', message: stepLimit })
+    return { text: finalText, stopReason: 'end_turn' }
   }
 
   /**
@@ -2775,6 +3049,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // 本轮提示缓存命中 / 写入量（纯观测，不参与判定），同样取最后一次。
     let lastCacheRead = 0
     let lastCacheWrite = 0
+    // 本轮如何结束（finally 据此决定要不要为排队的后台任务通知接着起一轮）。
+    let endReason: StopReason = 'error'
 
     // 本轮是否产出「可见回复」：本轮新增的任一 assistant 消息含非空正文或工具调用即算。
     // 与渲染层 hasVisibleAnswer 同义——决定自然结束却空回合时是否补「空回合」提示。
@@ -2905,6 +3181,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         },
         // 文件检查点（供回滚）：同一个记录器透传给子智能体，seq 全局递增。
         recorder: createRecorder(session),
+        // 后台子智能体在本轮期间结束：通知随下一步的工具结果交给模型。
+        takeNotices: () => takeNotices(sessionId),
         // 逐步落盘：长回合中途崩溃 / 强退，已完成的步骤仍在磁盘上。
         onStep: () => saveProject(sessionId),
         // 轮中压缩：旧读数作废（别让 finally 把压缩前的大数存成下轮触发依据）；本轮请求在历史里的位置变了，
@@ -2917,6 +3195,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       emit(turnId, sessionId, { type: 'done', stopReason })
       // 终态提示持久化（须在 finally 落盘前执行）：错误红框 / 截断 / 空回合入 notices 边车。
       recordTurnNotice(stopReason, errorMessage)
+      endReason = stopReason
     } catch (e) {
       const message = (e as Error)?.message ?? String(e)
       emit(turnId, sessionId, { type: 'error', kind: 'unknown', message })
@@ -2942,6 +3221,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       saveProject(sessionId)
       busySessions.delete(sessionId)
       collectBlobs(session)
+      // 本轮最后一步之后才结束的后台子智能体：它们的通知还在队列里，现在为它们起一轮。
+      // 用户刚按了停止就不起——通知留着，随下一条消息带给模型。
+      if (endReason !== 'aborted') wakeForNotices(sessionId)
     }
   }
 
@@ -3147,6 +3429,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     }
     const todoNote = todoReminderText(session.todos, session.todoCancelled)
     if (todoNote) parts.push({ type: 'text', text: todoNote })
+    // 还没投递的后台任务通知（用户亲手停止的子智能体，或上一轮被中止后留下的）：同样是正文之前的独立 text 块。
+    const bgNote = takeNotices(sessionId)
+    if (bgNote) parts.push({ type: 'text', text: bgNote })
     if (parts.length) {
       parts.push({ type: 'text', text: questionText })
       history.push({ role: 'user', content: parts })
@@ -3179,6 +3464,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       const turnId = genId('turn')
       const controller = new AbortController()
       activeTurns.set(turnId, controller)
+      compacting.add(sessionId)
       try {
         const session = getSession(sessionId)
         let status: CompactStatus = 'none'
@@ -3211,7 +3497,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         })
       } finally {
         activeTurns.delete(turnId)
+        compacting.delete(sessionId)
         emit(turnId, sessionId, { type: 'done', stopReason: 'end_turn' })
+        // 压缩期间结束的后台子智能体：此刻再为它们起轮。
+        wakeForNotices(sessionId)
       }
       return { turnId }
     }
@@ -3276,19 +3565,23 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // 载入即自愈并落盘：崩溃 / 强退遗留的悬空 tool_use 补成「未完成」，工具卡随之定格而不是永远转圈。
     // 回合进行中不碰（那时的悬空是工具正在执行）。
     if (s && !busySessions.has(sessionId) && repairDanglingToolUses(s)) saveProject(sessionId)
-    return s
-      ? toDisplayMessages(
-          s.messages,
-          s.proposals ?? {},
-          s.notices ?? [],
-          s.asks ?? {},
-          s.summaries ?? {},
-          s.plans ?? {},
-          s.autotasks ?? {},
-          s.todos ?? [],
-          (to) => getSubagentMeta(s.id, to)
-        )
-      : []
+    return s ? displayOf(s) : []
+  }
+
+  /** 会话 → 展示气泡（载入 / 按轮删除 / 回滚后回传渲染层）：消息 + 各展示边车。 */
+  function displayOf(s: StoredSession): DisplayMessage[] {
+    return toDisplayMessages(
+      s.messages,
+      s.proposals ?? {},
+      s.notices ?? [],
+      s.asks ?? {},
+      s.summaries ?? {},
+      s.plans ?? {},
+      s.autotasks ?? {},
+      s.todos ?? [],
+      (to) => getSubagentMeta(s.id, to),
+      s.background ?? {}
+    )
   }
 
   ipcMain.handle(
@@ -3382,6 +3675,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(
     'chat:delete-session',
     (_e, sessionId: string, _workspaceRoot: string | null): { ok: true } => {
+      cancelBackground(sessionId)
       deleteStoredSession(sessionId)
       pendingUndo.delete(sessionId)
       removeSessionCheckpoints(sessionId)
@@ -3402,15 +3696,30 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     return { ok: true }
   })
 
+  // 停止一个后台运行的子智能体（Task 卡上的停止键）。toolUseId = 开出它的那次调用 id（即卡片 id）。
+  // 它照常收尾：Task 卡定格「已停止」，结论（含停止前的输出）随下一轮交给模型，但不为此自动起一轮。
+  ipcMain.handle(
+    'chat:stop-subagent',
+    (_e, sessionId: string, toolUseId: string): { ok: boolean } => {
+      const b = backgroundSubagents.get(toolUseId)
+      if (!b || b.sessionId !== sessionId) return { ok: false }
+      b.stoppedByUser = true
+      b.controller.abort()
+      return { ok: true }
+    }
+  )
+
   // 重置会话历史与会话级授权（清空该会话正文但保留会话条目）。id 全局唯一 → 按 id。
   ipcMain.handle(
     'chat:reset',
     (_e, sessionId: string, _workspaceRoot: string | null): { ok: true } => {
+      cancelBackground(sessionId)
       const s = getSession(sessionId)
       if (s) {
         s.messages = []
         // 终态提示边车随正文一并清空——否则重置后残留的红框/提示会锚在空历史上。
         s.notices = []
+        s.background = {}
         // 检查点整套作废（记录 / 磁盘基准 / 待带给模型的回滚说明 / 撤销快照 / blob 目录）。
         s.checkpoints = {}
         s.lastKnown = {}
@@ -3449,17 +3758,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       saveProject(sessionId)
       collectBlobs(s)
       emitTodos(s)
-      return toDisplayMessages(
-        s.messages,
-        s.proposals ?? {},
-        s.notices ?? [],
-        s.asks ?? {},
-        s.summaries ?? {},
-        s.plans ?? {},
-        s.autotasks ?? {},
-        s.todos ?? [],
-        (to) => getSubagentMeta(s.id, to)
-      )
+      return displayOf(s)
     }
   )
 
@@ -3490,18 +3789,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
   /** 正在执行回滚 / 撤销的会话：防同一会话的两次回滚交错。 */
   const rewinding = new Set<string>()
-  const displayOf = (s: StoredSession): DisplayMessage[] =>
-    toDisplayMessages(
-      s.messages,
-      s.proposals ?? {},
-      s.notices ?? [],
-      s.asks ?? {},
-      s.summaries ?? {},
-      s.plans ?? {},
-      s.autotasks ?? {},
-      s.todos ?? [],
-      (to) => getSubagentMeta(s.id, to)
-    )
 
   // 回滚面板列表屏：每轮自身的改动量（文件数 / +N −M / 是否跑过命令）+ 能否撤销上次回滚。
   ipcMain.handle(
@@ -3565,6 +3852,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             proposals: s.proposals,
             asks: s.asks,
             summaries: s.summaries,
+            background: s.background,
             plans: s.plans,
             autotasks: s.autotasks,
             todos: s.todos,
@@ -3611,6 +3899,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         return { ok: true, messages: displayOf(s), restored, skipped }
       } finally {
         rewinding.delete(s.id)
+        // 回滚期间结束的后台子智能体：此刻再为它们起轮。推迟一拍，让回滚结果先于新一轮的事件到达渲染层
+        //（渲染层拿到结果会整份替换气泡）。
+        setTimeout(() => wakeForNotices(s.id), 0)
       }
     }
   )
@@ -3641,6 +3932,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         return { ok: true, messages: displayOf(s), restored: r.restored, skipped: r.skipped }
       } finally {
         rewinding.delete(sessionId)
+        setTimeout(() => wakeForNotices(sessionId), 0)
       }
     }
   )

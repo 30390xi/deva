@@ -419,11 +419,13 @@ function reduce(t: TurnTrack, ev: ChatStreamEvent): boolean {
       // 续聊（send_to_subagent）与新派出同样开子智能体卡；主进程已在事件参数里补上原类型与标题。
       if (ev.name === 'run_subagent' || ev.name === 'send_to_subagent') {
         const a = (ev.args ?? {}) as Record<string, unknown>
+        // 后台运行的：本轮里等不到它的结果（卡片停在进行中），标明「后台」；结束后另起的那一轮会推送结论。
+        const desc = typeof a.description === 'string' ? a.description : ''
         b.push({
           kind: 'subagent',
           id: ev.id,
           agent: typeof a.agent === 'string' ? a.agent : ev.agent ?? '',
-          desc: typeof a.description === 'string' ? a.description : '',
+          desc: a.run_in_background === true ? `${desc}（后台）` : desc,
           steps: 0,
           status: 'running'
         })
@@ -737,6 +739,8 @@ function onBusEvent({ turnId, sessionId, event }: ChatEventPayload): void {
   // 回合开始只为桌面窗口补用户气泡；手机端的回合视图在首个内容事件时建立。
   // 待办清单状态是会话级的胶囊数据（可能不属于任何回合），手机端不展示。
   if (event.type === 'usage' || event.type === 'turn_start' || event.type === 'todos') return
+  // 后台子智能体的过程不属于任何回合（turnId 为空串），手机端不展示；它结束后的那一轮照常推送。
+  if ((event.type === 'tool_call' || event.type === 'tool_result') && event.bg) return
   // 桌面手动 /compact 也走回合事件，但不是一轮对话：不推。
   if (event.type === 'compacted' && event.scope === 'manual') return
 

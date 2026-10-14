@@ -124,6 +124,8 @@ export type ChatBlock =
       task?: string
       /** 续聊卡：send_to_subagent 给已派出的子智能体发的消息（标题前加「继续」）。 */
       continued?: boolean
+      /** 后台运行（run_in_background）：派发它的那轮不等它，卡片独自运行到结束，运行中可单独停止。 */
+      background?: boolean
       status: ToolStatus
       /** 结论摘要（壳结果 summary，如「子智能体「X」已完成」）。 */
       summary?: string
@@ -202,6 +204,11 @@ export interface ChatMessage {
   blocks: ChatBlock[]
   /** 用户消息附件贴片（仅名称 + 类型，不含正文/base64）。 */
   attachments?: { name: string; kind: AttachKind }[]
+  /**
+   * 后台任务通知（后台子智能体结束后主进程自动起的那一轮的起点）：仍占一个用户位（轮下标照常对齐），
+   * 但展示为一行系统通知而非用户气泡，正文为通知标题。
+   */
+  notify?: boolean
 }
 
 /** 会话元信息（左侧列表用）。 */
@@ -250,7 +257,7 @@ export interface SessionLiveState {
 /** 与 preload/主进程 DisplayMessage 结构一致（渲染层结构化复述）。 */
 type DisplayBlock =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error'; summary?: string }
+  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error' | 'running'; summary?: string }
   | {
       kind: 'notice'
       code: 'compacted' | 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
@@ -268,7 +275,7 @@ type DisplayBlock =
   | { kind: 'plan'; id: string; plan: string; decision: 'approve' | 'keep' | 'cancelled' }
   | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 type DisplayMessage =
-  | { role: 'user'; text: string; attachments: { name: string; kind: AttachKind }[] }
+  | { role: 'user'; text: string; attachments: { name: string; kind: AttachKind }[]; notify?: true }
   | { role: 'assistant'; blocks: DisplayBlock[] }
 
 /** 与 preload/主进程 ChatStreamEvent 结构一致（按既定模式在渲染层复述线缆类型）。 */
@@ -283,6 +290,7 @@ type StreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      bg?: true
     }
   | {
       type: 'tool_result'
@@ -293,6 +301,7 @@ type StreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      bg?: true
     }
   | { type: 'ask_user'; key: string; questions: AskQuestion[] }
   | { type: 'plan_review'; key: string; plan: string }
@@ -325,7 +334,10 @@ type StreamEvent =
       status: 'accepted' | 'rejected' | 'created' | 'dismissed'
       taskId?: string
     }
-  | { type: 'turn_start'; user: { text: string; attachments: { name: string; kind: AttachKind }[] } }
+  | {
+      type: 'turn_start'
+      user: { text: string; attachments: { name: string; kind: AttachKind }[]; notify?: true }
+    }
   | { type: 'done'; stopReason: string }
 
 /**
@@ -451,6 +463,11 @@ interface ChatContextValue {
   todos: TodoState
   /** 手动取消当前会话的清单（不再进行）：胶囊收起，下一条消息告知模型。回合进行中主进程不受理。 */
   cancelTodoList: () => void
+  /**
+   * 停止当前会话里一个后台运行的子智能体（toolId = 其 Task 卡 id）。卡片随主进程的收尾事件定格「已停止」，
+   * 结论随下一轮交给模型（不为此自动起一轮）。
+   */
+  stopSubagent: (toolId: string) => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -481,7 +498,8 @@ function displayToMessages(dms: DisplayMessage[]): ChatMessage[] {
         id: genId(),
         role: 'user',
         blocks: dm.text ? [{ kind: 'text', text: dm.text }] : [],
-        attachments: dm.attachments.length ? dm.attachments : undefined
+        attachments: dm.attachments.length ? dm.attachments : undefined,
+        ...(dm.notify ? { notify: true } : {})
       }
     }
     const blocks: ChatBlock[] = dm.blocks.map((b) => {
@@ -505,7 +523,7 @@ function displayToMessages(dms: DisplayMessage[]): ChatMessage[] {
       if (b.kind === 'plan') return { kind: 'plan', key: b.id, plan: b.plan, decided: b.decision }
       // 历史回填：已完成的待办清单卡（条目取自主进程 todos 边车里令其完成的那次快照）。
       if (b.kind === 'todolist') return { kind: 'todolist', id: b.id, title: b.title, items: b.items }
-      const status: ToolStatus = b.status === 'error' ? 'error' : 'ok'
+      const status: ToolStatus = b.status === 'error' ? 'error' : b.status === 'running' ? 'running' : 'ok'
       // 历史回填：run_subagent / send_to_subagent 复原为折叠 Task 卡（内部子调用不入父历史，故 children
       // 为空、仅存结论）。
       if (isSubagentCall(b.name)) return subagentBlock(b.id, b.name, b.args, status, b.summary)
@@ -528,7 +546,8 @@ function subagentIndex(blocks: ChatBlock[], parent?: string): number {
   }
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
-    if (b.kind === 'subagent' && b.status === 'running') return i
+    // 后台运行的卡只认 parent（它的事件都带），不当兜底对象。
+    if (b.kind === 'subagent' && b.status === 'running' && !b.background) return i
   }
   return -1
 }
@@ -549,7 +568,13 @@ function subagentBlock(
   status: ToolStatus,
   summary?: string
 ): ChatBlock {
-  const a = (args ?? {}) as { agent?: unknown; prompt?: unknown; message?: unknown; description?: unknown }
+  const a = (args ?? {}) as {
+    agent?: unknown
+    prompt?: unknown
+    message?: unknown
+    description?: unknown
+    run_in_background?: unknown
+  }
   const continued = name === 'send_to_subagent'
   const task = continued ? a.message : a.prompt
   return {
@@ -559,10 +584,24 @@ function subagentBlock(
     desc: typeof a.description === 'string' ? a.description.trim() || undefined : undefined,
     task: typeof task === 'string' ? task : undefined,
     ...(continued ? { continued: true } : {}),
+    ...(a.run_in_background === true ? { background: true } : {}),
     status,
     summary,
     children: []
   }
+}
+
+/**
+ * 后台子智能体的事件（bg）并入块序列：只更新**本段**里那张 Task 卡（嵌套事件按 parent，壳结果按 id），卡不在
+ * 本段则原样返回。它不属于任何回合，卡可能落在任意一条历史消息里——绝不像实时事件那样兜底新建卡片。
+ */
+function reduceBackground(
+  blocks: ChatBlock[],
+  ev: Extract<StreamEvent, { type: 'tool_call' | 'tool_result' }>
+): ChatBlock[] {
+  const cardId = ev.depth && ev.depth > 0 ? ev.parent : ev.id
+  if (!blocks.some((b) => b.kind === 'subagent' && b.id === cardId)) return blocks
+  return reduceBlocks(blocks, ev)
 }
 
 /** 归一化 propose_agent 原始参数为角色草稿（实时路径；与主进程 normalizeAgentDraft 对齐）。 */
@@ -1145,6 +1184,13 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       // 或别处发起、经 turn_start / attachSession 接上的。只有这样的会话才能把流事件正确拼进气泡；
       // 其余是本层没缓存的后台回合 —— 内容以主进程 + 磁盘为唯一真源，绝不在此凑合拼装。
       const localStreaming = runtimesRef.current.get(sid)?.streaming === true
+
+      // 后台子智能体的过程与结局不属于任何回合（turnId 为空串）：按卡片 id 在全部消息里就地更新那张 Task 卡。
+      // 没缓存该会话就不管——打开时从主进程重载，卡片状态以边车为准（子步骤不落盘，重载后只剩结论）。
+      if ((ev.type === 'tool_call' || ev.type === 'tool_result') && ev.bg) {
+        if (runtimesRef.current.has(sid)) patchCardBlocks(sid, (blocks) => reduceBackground(blocks, ev))
+        return
+      }
 
       // 回合开始。本层自己发起的已建好脚手架（send 尚未返回、turnId 未回填）→ 跳过。别处发起的
       //（手机端 / 定时任务）当本地回合呈现：缓存着该会话就补用户气泡 + 空助手位并置流式；没缓存但正在看
@@ -1773,6 +1819,12 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
         .catch(() => undefined)
     }
 
+    const stopSubagent = (toolId: string): void => {
+      const sid = sessionIdRef.current
+      if (!sid) return
+      void window.deva.chat.stopSubagent(sid, toolId).catch(() => undefined)
+    }
+
     return {
       sessions,
       currentSessionId,
@@ -1799,7 +1851,8 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       resolveProposal,
       resolveAutotask,
       todos: todoStates.get(currentSessionId) ?? EMPTY_TODOS,
-      cancelTodoList
+      cancelTodoList,
+      stopSubagent
     }
   }, [
     sessions,

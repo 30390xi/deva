@@ -250,7 +250,13 @@ const zhCN: MessageTree = {
       fork: '分身',
       task: '任务',
       stepUnit: '步',
-      noSteps: '无内部工具调用'
+      noSteps: '无内部工具调用',
+      // run_in_background：派发它的那轮不等它，结束后自动通知主智能体。
+      background: '后台',
+      stop: '停止',
+      stopHint: '停止这个后台子智能体（它停止前的输出会随下一条消息交给主智能体）',
+      // 后台任务通知行的兜底文案（主进程通常会给出具体标题）。
+      notify: '后台任务已结束'
     },
     toolGroup: {
       title: '调用了 {n} 个工具',
@@ -1095,7 +1101,11 @@ const en: MessageTree = {
       fork: 'Fork',
       task: 'Task',
       stepUnit: 'steps',
-      noSteps: 'No internal tool calls'
+      noSteps: 'No internal tool calls',
+      background: 'Background',
+      stop: 'Stop',
+      stopHint: 'Stop this background subagent (its output so far goes to the main agent with your next message)',
+      notify: 'Background task finished'
     },
     toolGroup: {
       title: '{n} tool calls',

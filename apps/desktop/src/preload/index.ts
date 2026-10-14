@@ -125,7 +125,8 @@ export interface AutotaskDraft {
 /** 重建历史用的展示块 / 消息（与 services/chat.ts 的 DisplayMessage 对齐）。 */
 export type DisplayBlock =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error'; summary?: string }
+  /** status=running 仅见于仍在后台运行的子智能体 Task 卡。 */
+  | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error' | 'running'; summary?: string }
   | {
       kind: 'notice'
       code: 'compacted' | 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
@@ -158,7 +159,13 @@ export type DisplayBlock =
   | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 
 export type DisplayMessage =
-  | { role: 'user'; text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] }
+  | {
+      role: 'user'
+      text: string
+      attachments: { name: string; kind: 'image' | 'document' | 'text' }[]
+      /** 后台任务通知：展示为一行系统通知而非用户气泡，text 为其标题。 */
+      notify?: true
+    }
   | { role: 'assistant'; blocks: DisplayBlock[] }
 
 /** 回滚列表里每轮自身的改动量（与 services/checkpoints.ts 的 RewindTurnStat 对齐）。 */
@@ -610,7 +617,10 @@ export interface ProviderListModelsResult {
 export type ChatStreamEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'thinking_delta'; text: string }
-  /** depth>0 + agent + parent：来自某子智能体（折叠进 parent 那次 run_subagent 调用开出的 Task 卡）。 */
+  /**
+   * depth>0 + agent + parent：来自某子智能体（折叠进 parent 那次 run_subagent 调用开出的 Task 卡）。
+   * bg：来自后台运行的子智能体，不属于任何回合（turnId 为空串），Task 卡可能在任意一条历史消息里。
+   */
   | {
       type: 'tool_call'
       id: string
@@ -619,6 +629,7 @@ export type ChatStreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      bg?: true
     }
   | {
       type: 'tool_result'
@@ -630,6 +641,8 @@ export type ChatStreamEvent =
       depth?: number
       agent?: string
       parent?: string
+      /** 后台子智能体：嵌套结果，或（depth 0）它结束时给自己那张 Task 卡定格的壳结果。 */
+      bg?: true
     }
   | { type: 'ask_user'; key: string; questions: AskQuestion[] }
   /** 计划审阅：exit_plan 提交计划，暂停等待用户批准（approve/keep）。 */
@@ -675,7 +688,11 @@ export type ChatStreamEvent =
       taskId?: string
     }
   /** 回合开始（本轮首个事件）：带本轮用户消息，供渲染层把别处发起的一轮当本地回合呈现。 */
-  | { type: 'turn_start'; user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[] } }
+  | {
+      type: 'turn_start'
+      /** notify：本轮由后台任务通知自动发起，text 为通知标题。 */
+      user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[]; notify?: true }
+    }
   | { type: 'done'; stopReason: string }
 
 /** IM 机器人（远程通道）状态，与 services/remote/index.ts 的 BotView / ScanEvent 对齐。 */
@@ -873,6 +890,9 @@ const api = {
     setFocus: (req: ChatSetFocusRequest): Promise<{ ok: true }> =>
       ipcRenderer.invoke('chat:set-focus', req),
     abort: (turnId: string): Promise<{ ok: true }> => ipcRenderer.invoke('chat:abort', turnId),
+    /** 停止一个后台运行的子智能体（toolUseId = 其 Task 卡 id）；已结束 / 不存在回 ok:false。 */
+    stopSubagent: (sessionId: string, toolUseId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('chat:stop-subagent', sessionId, toolUseId),
     reset: (sessionId: string, workspaceRoot: string | null): Promise<{ ok: true }> =>
       ipcRenderer.invoke('chat:reset', sessionId, workspaceRoot),
     /** 某项目下的会话清单（按 updatedAt 倒序） */

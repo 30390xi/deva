@@ -143,7 +143,8 @@ export function deriveActivity(messages: ChatMessage[]): Activity {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i]
     if (b.kind === 'tool' && b.status === 'running') return { kind: 'tool', toolName: b.name }
-    if (b.kind === 'subagent' && b.status === 'running')
+    // 后台子智能体不是本轮在等的事（本轮已越过它接着干），不算当前活动。
+    if (b.kind === 'subagent' && b.status === 'running' && !b.background)
       return { kind: 'subagent', agent: b.agent }
   }
   const tail = blocks[blocks.length - 1]
@@ -289,7 +290,8 @@ export function BlockView({
   onPlan,
   onMountReq,
   onOpenProposal,
-  onOpenAutotask
+  onOpenAutotask,
+  onStopSubagent
 }: {
   block: ChatBlock
   thinkingDone: boolean
@@ -302,6 +304,8 @@ export function BlockView({
   onOpenProposal?: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   /** created 态定时任务名片「打开任务会话」（缺省 → 不显跳转）。 */
   onOpenAutotask?: (taskId: string) => void
+  /** 停止后台运行的子智能体（缺省 → Task 卡不显停止键）。 */
+  onStopSubagent?: (toolId: string) => void
 }): React.JSX.Element | null {
   const { t } = useI18n()
 
@@ -335,7 +339,7 @@ export function BlockView({
   }
 
   if (block.kind === 'subagent') {
-    return <SubagentCard block={block} />
+    return <SubagentCard block={block} onStop={onStopSubagent} />
   }
 
   if (block.kind === 'agentcard') {
@@ -1002,34 +1006,58 @@ function subagentName(agent: string | undefined, t: (key: string) => string): st
  * 子智能体的权限请求不在此卡内——照常作为顶层权限卡浮出确认（见 reduceBlocks）。
  */
 function SubagentCard({
-  block
+  block,
+  onStop
 }: {
   block: Extract<ChatBlock, { kind: 'subagent' }>
+  onStop?: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  // 已点停止、等主进程收尾事件定格卡片的那一小段：按钮置灰，免得连点。
+  const [stopping, setStopping] = useState(false)
   // 标题优先用模型给的任务描述（3-5 字）：比固定的子智能体名有信息量，也与 Claude Code 一致；
   // 没给描述时退回子智能体名（未指定预设则为「通用子智能体」）。
   const name = block.desc || subagentName(block.agent, t) || t('chat.subagent.fallback')
   const count = block.children.length
+  // 后台运行中的子智能体不随主轮的停止键停下，只能在这里单独停。
+  const stoppable = block.background && block.status === 'running' && onStop
   return (
     <div className={`subagent${open ? ' is-open' : ''}`}>
-      <button type="button" className="subagent__head" onClick={() => setOpen((v) => !v)}>
-        <ChevronRight size={13} className="subagent__caret" />
-        <span className="subagent__head-icon">
-          <Bot size={14} />
-        </span>
-        <span className="subagent__title">
-          {t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')} ·{' '}
-          <strong>{name}</strong>
-          {count > 0 && (
-            <span className="subagent__count">
-              {count} {t('chat.subagent.stepUnit')}
-            </span>
-          )}
-        </span>
-        <ToolBadge status={block.status} summary={block.summary} />
-      </button>
+      <div className="subagent__headrow">
+        <button type="button" className="subagent__head" onClick={() => setOpen((v) => !v)}>
+          <ChevronRight size={13} className="subagent__caret" />
+          <span className="subagent__head-icon">
+            <Bot size={14} />
+          </span>
+          <span className="subagent__title">
+            {t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')} ·{' '}
+            <strong>{name}</strong>
+            {block.background && <span className="subagent__bg">{t('chat.subagent.background')}</span>}
+            {count > 0 && (
+              <span className="subagent__count">
+                {count} {t('chat.subagent.stepUnit')}
+              </span>
+            )}
+          </span>
+          <ToolBadge status={block.status} summary={block.summary} />
+        </button>
+        {stoppable && (
+          <button
+            type="button"
+            className="subagent__stop"
+            title={t('chat.subagent.stopHint')}
+            disabled={stopping}
+            onClick={() => {
+              setStopping(true)
+              onStop(block.id)
+            }}
+          >
+            <Square size={10} />
+            {t('chat.subagent.stop')}
+          </button>
+        )}
+      </div>
       {open && (
         <div className="subagent__body">
           {block.task && (

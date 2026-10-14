@@ -32,6 +32,12 @@ export const COMPACT_MARKER = '⟦deva:compaction⟧'
  */
 export const AUTO_MARKER = '⟦deva:auto⟧'
 
+/**
+ * 后台任务通知消息的标记前缀：后台子智能体结束、主智能体空闲时，主进程以它开头注入一条 user 消息并自动
+ * 起一轮。它**算一轮起点**（展示为一行系统通知而非用户气泡，轮下标照常对齐），标记后的首行是展示用标题。
+ */
+export const NOTIFY_MARKER = '⟦deva:notify⟧'
+
 export type CompactStatus = 'compacted' | 'none' | 'failed'
 
 interface CompactionCfg {
@@ -267,6 +273,10 @@ export function buildTranscript(messages: Message[], locale: string): string {
 
   for (const m of messages) {
     if (isAutoNudge(m)) continue
+    if (isTaskNotification(m) && typeof m.content === 'string') {
+      lines.push(`[${zh ? '系统通知' : 'system notice'}]: ${m.content.slice(NOTIFY_MARKER.length)}`)
+      continue
+    }
     const label = m.role === 'user' ? U : A
     if (typeof m.content === 'string') {
       if (m.content.trim()) lines.push(`${label}: ${m.content}`)
@@ -578,4 +588,9 @@ export function stripMarker(content: string): string {
 /** 该消息是否为引擎注入的自愈引导（见 AUTO_MARKER）。 */
 export function isAutoNudge(m: Message): boolean {
   return m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(AUTO_MARKER)
+}
+
+/** 该消息是否为后台任务通知（见 NOTIFY_MARKER）。 */
+export function isTaskNotification(m: Message): boolean {
+  return m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(NOTIFY_MARKER)
 }
