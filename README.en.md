@@ -46,7 +46,7 @@ It can also handle repetitive chores on a schedule, and you can keep chatting fr
     </td>
     <td width="33%" valign="top">
       <h3>🤖 Subagents, multi-agent dispatch</h3>
-      Big tasks get split up and dispatched to multiple subagents running in parallel. Three built-in types — General, Explore and Plan — each with its own context, returning only the conclusions.
+      Big tasks get split up and dispatched to multiple subagents running in parallel — or in the background when the result isn't needed right away. Three built-in types — General, Explore and Plan — each with its own context, returning only the conclusions.
     </td>
   </tr>
   <tr>
@@ -138,6 +138,8 @@ Without a folder, it's a general-purpose assistant for your whole computer; moun
 
 For bigger jobs, it looks around first and drafts a plan; it only starts once you click "Approve and execute", and you can ask it to keep refining the plan if you're not happy. When it needs your decision midway, it pops up options for you to pick — or you can type your own answer.
 
+For multi-step work it keeps a todo list and checks items off as it goes: a small pill above the input box shows the current progress — click it to see every item, or hit "Cancel list" if you no longer want it done. Once everything is finished, a "Completed list" card is left in the chat.
+
 > [!TIP]
 > If the project root contains an `AGENTS.md`, it reads it as the project guide and follows the conventions inside.
 
@@ -152,6 +154,8 @@ When a task requires going through many files, or can be split into independent 
 | **Plan** | Surveys the current state, then writes a step-by-step implementation plan, key files and trade-offs | Read-only, plans only |
 
 - ⚡ **Truly parallel**: independent subtasks are dispatched in the same turn and run together
+- 🌙 **Background runs**: when a conclusion isn't needed right away, it sends the subagent to the background and moves on to other work or replies to you first; when the background run finishes it's notified automatically — a completion notice appears in the chat and it picks things up from there. The "Stop" button on the card stops an individual background subagent (the main chat's stop button doesn't)
+- ♾️ **No step limit**: subagents have no cap on tool-call steps, so wide searches and long tasks run through to the end
 - 🧹 **Keeps the main chat clean**: each subagent has its own context; files it read and commands it ran stay out of the main conversation — only conclusions come back
 - 🔍 **Visible process**: each subagent's work is collapsed into a card you can expand to see what it looked into
 - 🧠 **Model follows along**: subagents use the model selected for the current conversation, no extra setup
