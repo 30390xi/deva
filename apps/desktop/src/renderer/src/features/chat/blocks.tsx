@@ -418,12 +418,18 @@ function MountRequestCard({
     })()
   }
   return (
-    <div className={decided ? 'msg__mount is-decided' : 'msg__mount'}>
+    <div
+      className={`msg__mount${decided ? ' is-decided' : ''}${decided === 'mounted' ? ' is-ok' : ''}`}
+    >
       <div className="msg__mount-head">
         <FolderOpen size={14} />
         <span className="msg__mount-title">{t('chat.mount.cardTitle')}</span>
         {decided && (
-          <span className="msg__mount-badge">
+          <span
+            className={
+              decided === 'mounted' ? 'msg__mount-badge msg__mount-badge--ok' : 'msg__mount-badge'
+            }
+          >
             {decided === 'mounted' ? t('chat.mount.mounted') : t('chat.mount.skipped')}
           </span>
         )}
@@ -490,7 +496,9 @@ function PlanReviewCard({
         .trim()
     : ''
   return (
-    <div className={decided ? 'msg__plan is-decided' : 'msg__plan'}>
+    <div
+      className={`msg__plan${decided ? ' is-decided' : ''}${decided === 'approve' ? ' is-ok' : ''}`}
+    >
       <div
         className={decided ? 'msg__plan-head is-toggle' : 'msg__plan-head'}
         role={decided ? 'button' : undefined}
@@ -512,7 +520,7 @@ function PlanReviewCard({
         {decided && (
           <ChevronRight size={14} className={open ? 'msg__plan-caret is-open' : 'msg__plan-caret'} />
         )}
-        <ClipboardList size={14} />
+        <ClipboardList size={14} className="msg__plan-icon" />
         <span className="msg__plan-title">{t('chat.plan.cardTitle')}</span>
         {decided && !open && summary && <span className="msg__plan-summary">{summary}</span>}
         {decided && (
@@ -578,6 +586,7 @@ function draftToAnswer(d: AskDraft): string {
  * 问答卡（征求决策/澄清）：每题单选或多选、每题都可自行输入，用户选好后统一提交。
  * 多问题时改为「分步向导」——每次只显示一题、可前后切换（类 Claude Code），避免一次性铺开过长；
  * 单问题保持一次性展示。全部问题都作答后「提交」才可用；作答后收敛为已答态，逐题回述答案。
+ * 已答态默认**收起**（与计划卡同构：标题行 + 答案摘要 + 状态徽标），点标题行展开/收起逐题回述。
  */
 function AskCard({
   block,
@@ -591,6 +600,10 @@ function AskCard({
   const multiQ = questions.length > 1
   const last = questions.length - 1
   const answered = block.answers !== undefined
+  // 已答态：默认收起；摘要 = 各题非空答案按「；」拼接（单题即答案本身），徽标按实答题数决定绿/灰。
+  const [open, setOpen] = useState(false)
+  const givenAnswers = (block.answers ?? []).filter((a) => a.trim())
+  const answerSummary = givenAnswers.join('；')
   const [drafts, setDrafts] = useState<AskDraft[]>(() =>
     questions.map(() => ({ picks: [], customOn: false, custom: '' }))
   )
@@ -643,13 +656,14 @@ function AskCard({
   const inputShown = (qi: number): boolean =>
     questions[qi].options.length === 0 || drafts[qi].customOn
 
-  // 每题「已作答」= 可跳过题(required===false)恒视为已答；否则需选了项或填了（已展开的）自由输入。
-  const isDone = (qi: number): boolean => {
-    if (questions[qi].required === false) return true
+  // 「真有答案」= 选了项或填了（已展开的）自由输入：步骤圆点打勾只看这个，可跳过题未答不打勾。
+  const isAnswered = (qi: number): boolean => {
     const d = drafts[qi]
     if (d.picks.length > 0) return true
     return inputShown(qi) && d.custom.trim().length > 0
   }
+  // 「可放行」（下一步/提交是否可用）= 可跳过题(required===false)恒放行；否则需真有答案。
+  const isDone = (qi: number): boolean => questions[qi].required === false || isAnswered(qi)
   const allDone = questions.every((_, qi) => isDone(qi))
   // 空答（未选也未填）：用于把可跳过题的按钮文案从「下一步/提交」切成「跳过」。
   const isBlank = (qi: number): boolean =>
@@ -766,27 +780,58 @@ function AskCard({
 
   return (
     <div className={`ask${answered ? ' is-answered' : ''}`}>
-      <div className="ask__head">
-        <span className="ask__head-icon">
-          <MessageCircleQuestion size={15} />
-        </span>
-        {t('chat.ask.title')}
-        {!answered && multiQ && (
-          <span className="ask__progress">
-            {step + 1} / {questions.length}
+      {answered ? (
+        // 已答：标题行可点，展开/收起逐题回述；收起时只留答案摘要 + 状态徽标。
+        <div
+          className="ask__head is-toggle"
+          role="button"
+          tabIndex={0}
+          aria-expanded={open}
+          title={open ? t('chat.ask.collapse') : t('chat.ask.expand')}
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setOpen((v) => !v)
+            }
+          }}
+        >
+          <ChevronRight size={14} className={open ? 'ask__caret is-open' : 'ask__caret'} />
+          <span className="ask__head-icon">
+            <MessageCircleQuestion size={15} />
           </span>
-        )}
-      </div>
+          <span className="ask__title">{t('chat.ask.title')}</span>
+          {!open && answerSummary && <span className="ask__summary">{answerSummary}</span>}
+          <span className={givenAnswers.length > 0 ? 'ask__badge ask__badge--ok' : 'ask__badge'}>
+            {givenAnswers.length > 0 ? t('chat.ask.answered') : t('chat.ask.unanswered')}
+            {multiQ && givenAnswers.length > 0 && ` ${givenAnswers.length}/${questions.length}`}
+          </span>
+        </div>
+      ) : (
+        <div className="ask__head">
+          <span className="ask__head-icon">
+            <MessageCircleQuestion size={15} />
+          </span>
+          {t('chat.ask.title')}
+          {multiQ && (
+            <span className="ask__progress">
+              {step + 1} / {questions.length}
+            </span>
+          )}
+        </div>
+      )}
 
       {answered ? (
-        // 已答：逐题回述（紧凑，一行一答）。
+        // 已答展开：逐题回述（紧凑，一行一答）；收起时不渲染。
+        open &&
         questions.map((q, qi) => (
           <div className="ask__q" key={qi}>
             <div className="ask__question">
               {multiQ && <span className="ask__q-num">{qi + 1}.</span>}
               {q.question}
             </div>
-            <div className="ask__resolved">
+            {/* 真有答案 → 成功绿勾；跳过/未作答 → 灰勾，不冒充「已确认」。 */}
+            <div className={block.answers?.[qi] ? 'ask__resolved is-ok' : 'ask__resolved'}>
               <CheckCircle2 size={13} />
               <span>{block.answers?.[qi] || t('chat.ask.noAnswer')}</span>
             </div>
@@ -801,12 +846,12 @@ function AskCard({
                 key={i}
                 type="button"
                 className={`ask__step-dot${i === step ? ' is-current' : ''}${
-                  isDone(i) ? ' is-done' : ''
+                  isAnswered(i) ? ' is-done' : ''
                 }`}
                 onClick={() => goStep(i)}
                 aria-label={`${i + 1}`}
               >
-                {isDone(i) && i !== step ? <Check size={12} /> : i + 1}
+                {isAnswered(i) && i !== step ? <Check size={12} /> : i + 1}
               </button>
             ))}
           </div>

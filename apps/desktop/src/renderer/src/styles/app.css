@@ -1397,7 +1397,7 @@ textarea {
   color: var(--accent);
 }
 .agentcard__hint.is-accepted {
-  color: var(--ok, #22a06b);
+  color: var(--success);
 }
 .agentcard__hint.is-rejected {
   color: var(--fg-subtle);
@@ -1665,13 +1665,63 @@ textarea {
   font-weight: 600;
   color: var(--fg);
 }
+/* 已答回述的勾：真有答案 → 成功绿（用户确认色）；跳过/未作答 → 灰。 */
 .ask__resolved svg {
-  color: var(--accent);
+  color: var(--fg-subtle);
   flex: none;
+}
+.ask__resolved.is-ok svg {
+  color: var(--success);
 }
 .ask.is-answered {
   background: var(--bg-elevated);
   border-color: var(--border);
+}
+/* 已答态标题行：可点展开/收起（与计划卡同构）；收起时标题行即末元素，去掉下边距。 */
+.ask__head.is-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.ask__head:last-child {
+  margin-bottom: 0;
+}
+.ask.is-answered .ask__head-icon {
+  color: var(--fg-muted);
+}
+.ask__caret {
+  flex: none;
+  color: var(--fg-muted);
+  transition: transform 0.15s ease;
+}
+.ask__caret.is-open {
+  transform: rotate(90deg);
+}
+.ask__title {
+  flex-shrink: 0;
+}
+.ask__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+/* 状态徽标：有实答 → 成功绿（用户确认色）；全部未作答 → 灰。 */
+.ask__badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg-muted) 12%, transparent);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+}
+.ask__badge--ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 
 /* ---------- 按钮 ---------- */
@@ -2231,6 +2281,10 @@ textarea {
 .msg__plan.is-decided .msg__plan-head svg {
   color: var(--fg-muted);
 }
+/* 已批准：卡片图标随徽标转成功绿（展开箭头不跟着变）。 */
+.msg__plan.is-ok .msg__plan-icon {
+  color: var(--success);
+}
 .msg__plan-title {
   color: var(--fg);
   flex-shrink: 0;
@@ -2314,6 +2368,10 @@ textarea {
 .msg__mount.is-decided .msg__mount-head svg {
   color: var(--fg-muted);
 }
+/* 已挂载：图标与徽标转成功绿（与计划卡「已批准」同一套用户确认色）；暂不挂载保持灰。 */
+.msg__mount.is-ok .msg__mount-head svg {
+  color: var(--success);
+}
 .msg__mount-title {
   color: var(--fg);
 }
@@ -2325,6 +2383,10 @@ textarea {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   padding: 1px var(--space-2);
   border-radius: var(--radius-full);
+}
+.msg__mount-badge--ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 .msg__mount-body {
   display: flex;
@@ -4815,6 +4877,15 @@ select.sched__ctl {
 }
 .autotaskcard--dismissed .autotaskcard__icon {
   color: var(--fg-subtle);
+}
+/* 已创建（用户批准）：与其它已决卡一样淡化底框，图标与「已创建」勾转成功绿。 */
+.autotaskcard--created {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+.autotaskcard--created .autotaskcard__icon,
+.autotaskcard--created .autotaskcard__done-title svg {
+  color: var(--success);
 }
 .autotaskcard__done-body {
   display: flex;

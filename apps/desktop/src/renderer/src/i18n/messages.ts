@@ -294,7 +294,11 @@ const zhCN: MessageTree = {
       skip: '跳过',
       prev: '上一步',
       next: '下一步',
-      noAnswer: '（未作答）'
+      noAnswer: '（未作答）',
+      answered: '已回答',
+      unanswered: '未作答',
+      expand: '展开回答',
+      collapse: '收起回答'
     },
     todo: {
       untitled: '任务清单',
@@ -1143,7 +1147,11 @@ const en: MessageTree = {
       skip: 'Skip',
       prev: 'Previous',
       next: 'Next',
-      noAnswer: '(no answer)'
+      noAnswer: '(no answer)',
+      answered: 'Answered',
+      unanswered: 'No answer',
+      expand: 'Show answers',
+      collapse: 'Hide answers'
     },
     todo: {
       untitled: 'Task list',
