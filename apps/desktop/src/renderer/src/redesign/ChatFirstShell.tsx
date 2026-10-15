@@ -162,6 +162,15 @@ function basename(p: string): string {
 }
 
 /**
+ * 嵌进纯文本标题（如删除确认框）的名字限长：超过 max 个字符截断补「…」。按码点切，不劈开 emoji 等代理对。
+ * 确认框标题是拼好的整句，CSS 省略会连带吃掉句尾的「？」，故在文本层截断。
+ */
+function clipName(s: string, max = 20): string {
+  const chars = Array.from(s)
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : s
+}
+
+/**
  * 无对话头的中列界面（快速开启 / 角色空态 / 资料卡）共用的顶部拖拽把手：一条透明、与原生标题栏同高的
  * 窗口拖拽区，补上这些界面缺失的顶部拖拽（对话视图已由 .cf-conv__head 承担）。纯装饰、无交互。
  */
@@ -417,9 +426,10 @@ export function ChatFirstShell(): React.JSX.Element {
 
   // 右键删除（对话 / 角色）：先弹居中确认框（破坏性 → 红色确认键），确认后才走既有删除通路——
   // 对话经 deleteSession（中止在跑回合 + 落盘删除 + 切到最近会话），角色经 remove('persona')。
-  // 标题直接写成「删除对话 xxx ？/删除角色 xxx ？」这一动作问句（比裸标题更醒目），随语言拼装。
+  // 标题直接写成「删除对话 xxx ？/删除角色 xxx ？」这一动作问句（比裸标题更醒目），随语言拼装；
+  // 名字经 clipName 限长，过长截断补「…」，免得撑宽 / 撑高弹框。
   const deleteThread = (id: string, title: string): void => {
-    const name = title || t('chat.untitled')
+    const name = clipName(title || t('chat.untitled'))
     const heading = locale === 'en' ? `Delete conversation “${name}”?` : `删除对话 ${name} ？`
     void (async () => {
       const ok = await dialog.confirm({
@@ -454,7 +464,8 @@ export function ChatFirstShell(): React.JSX.Element {
     if (id === DEFAULT_PERSONA_ID) return
     // 该角色名下已落库的对话（草稿未落库不计），删角色时一并清除；数量用于提示影响面。
     const relatedIds = sessions.filter((s) => s.personaId === id).map((s) => s.id)
-    const heading = locale === 'en' ? `Delete persona “${name}”?` : `删除角色 ${name} ？`
+    const shown = clipName(name)
+    const heading = locale === 'en' ? `Delete persona “${shown}”?` : `删除角色 ${shown} ？`
     // 有关联对话 → 提示「同时删除 N 个对话」；无 → 用不涉及对话的简短文案。
     const message =
       relatedIds.length > 0
@@ -697,7 +708,7 @@ function Rail({
   viewPersonaId: string | null
   onOpenThread: (id: string) => void
   onOpenProfile: (id: string) => void
-  /** 角色行右键「开始对话」：以该角色发起一条全新对话（复用 startWith）。 */
+  /** 以该角色发起一条全新对话（复用 startWith）：角色行右键「开始对话」与搜索行「新建对话」浮层共用。 */
   onStartPersona: (id: string) => void
   onAddPersona: () => void
   onAddPersonaByChat: () => void
@@ -763,7 +774,7 @@ function Rail({
   }
   return (
     <aside className="cf-rail">
-      {/* 顶部：搜索占满整行；角色 tab 额外并排一个「添加角色」入口（悬停/点击出二选一弹层）。 */}
+      {/* 顶部：搜索占满整行；消息 tab 并排「新建对话」入口（悬停出角色列表），角色 tab 并排「添加角色」入口（悬停/点击出二选一弹层）。 */}
       <div className="cf-rail__top">
         <div className="cf-search">
           <Search className="cf-search__icon" size={14} />
@@ -786,6 +797,7 @@ function Rail({
             </button>
           )}
         </div>
+        {tab === 'chats' && <NewChatMenu personas={personas} onStart={onStartPersona} />}
         {tab === 'roster' && (
           <AddMenu
             manualLabel={t('cf.addPersona')}
@@ -1697,9 +1709,102 @@ function CommitModal({
 }
 
 /**
+ * 搜索行 + 按钮浮层的开合逻辑（AddMenu / NewChatMenu 共用）：悬停或点击展开，
+ * 离开略延迟收起以容忍按钮→浮层途中的空档（避免闪烁），choose 选中即收起并执行。
+ */
+function useHoverMenu(): {
+  open: boolean
+  hoverProps: { onMouseEnter: () => void; onMouseLeave: () => void }
+  show: () => void
+  choose: (fn: () => void) => void
+} {
+  const [open, setOpen] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  const cancelClose = (): void => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+  }
+  const scheduleClose = (): void => {
+    cancelClose()
+    closeTimer.current = window.setTimeout(() => setOpen(false), 140)
+  }
+  useEffect(() => cancelClose, [])
+
+  return {
+    open,
+    hoverProps: {
+      onMouseEnter: () => {
+        cancelClose()
+        setOpen(true)
+      },
+      onMouseLeave: scheduleClose
+    },
+    show: () => setOpen(true),
+    choose: (fn) => {
+      cancelClose()
+      setOpen(false)
+      fn()
+    }
+  }
+}
+
+/**
+ * 「新建对话」入口（消息 tab 搜索行右侧）：外观与交互同 AddMenu，浮层列出花名册全部角色，
+ * 点某个角色即以其开启一条全新对话（onStart → startWith）。角色多时浮层内滚动。
+ */
+function NewChatMenu({
+  personas,
+  onStart
+}: {
+  personas: Persona[]
+  onStart: (personaId: string) => void
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const { open, hoverProps, show, choose } = useHoverMenu()
+  return (
+    <div className="cf-addmenu" {...hoverProps}>
+      <button
+        className="cf-rail__addbtn"
+        title={t('cf.newChat')}
+        aria-label={t('cf.newChat')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={show}
+      >
+        <Plus size={16} />
+      </button>
+      {open && personas.length > 0 && (
+        <div className="cf-addmenu__pop cf-addmenu__pop--scroll" role="menu">
+          {personas.map((p) => (
+            <button
+              key={p.id}
+              className="cf-addmenu__item cf-addmenu__item--persona"
+              role="menuitem"
+              // 名字 / 专长过长时单行省略，悬停 title 给出全文。
+              title={p.desc ? `${p.name} · ${p.desc}` : p.name}
+              onClick={() => choose(() => onStart(p.id))}
+            >
+              <Avatar persona={p} size={28} />
+              {/* 与花名册行同构：角色名 + 专长（未填写则只显示名字）。 */}
+              <span className="cf-addmenu__main">
+                <span className="cf-addmenu__name">{p.name}</span>
+                {p.desc && <span className="cf-addmenu__desc">{p.desc}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * 「添加」入口（角色花名册 / 定时任务共用）：一个 + 图标，鼠标悬停或点击弹出二选一浮层——
  * 手动添加（打开编辑器表单）/ 通过对话添加（新建对话、Agent 引导创建）。
- * 离开略延迟收起以容忍按钮→浮层途中的空档，选中即收起并执行。文案由调用方按对象给（角色 / 任务）。
+ * 开合逻辑见 useHoverMenu。文案由调用方按对象给（角色 / 任务）。
  */
 function AddMenu({
   manualLabel,
@@ -1714,44 +1819,17 @@ function AddMenu({
   onManual: () => void
   onByChat: () => void
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const closeTimer = useRef<number | null>(null)
-
-  const cancelClose = (): void => {
-    if (closeTimer.current !== null) {
-      window.clearTimeout(closeTimer.current)
-      closeTimer.current = null
-    }
-  }
-  // 离开时略延迟收起，避免从 + 按钮移到浮层项途中的短暂空档导致闪烁。
-  const scheduleClose = (): void => {
-    cancelClose()
-    closeTimer.current = window.setTimeout(() => setOpen(false), 140)
-  }
-  useEffect(() => cancelClose, [])
-
-  const choose = (fn: () => void): void => {
-    cancelClose()
-    setOpen(false)
-    fn()
-  }
+  const { open, hoverProps, show, choose } = useHoverMenu()
 
   return (
-    <div
-      className="cf-addmenu"
-      onMouseEnter={() => {
-        cancelClose()
-        setOpen(true)
-      }}
-      onMouseLeave={scheduleClose}
-    >
+    <div className="cf-addmenu" {...hoverProps}>
       <button
         className="cf-rail__addbtn"
         title={manualLabel}
         aria-label={manualLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen(true)}
+        onClick={show}
       >
         <Plus size={16} />
       </button>
@@ -4141,7 +4219,9 @@ function ProfileView({
               title={persona.name}
             />
           </div>
-          <div className="cf-profile__name">{persona.name}</div>
+          <div className="cf-profile__name cf-profile__clip" title={persona.name}>
+            {persona.name}
+          </div>
           <div className="cf-profile__spec">{persona.desc}</div>
 
           <div className="cf-profile__meta">
@@ -4161,9 +4241,13 @@ function ProfileView({
           </div>
 
           <div className="cf-profile__convs">
-            <div className="cf-profile__convs-label">{convsLabel}</div>
+            <div className="cf-profile__convs-label cf-profile__clip" title={convsLabel}>
+              {convsLabel}
+            </div>
             {convs.length === 0 ? (
-              <div className="cf-empty">{noConvs}</div>
+              <div className="cf-empty cf-profile__clip" title={noConvs}>
+                {noConvs}
+              </div>
             ) : (
               convs.map((s) => (
                 <button key={s.id} className="cf-convrow" onClick={() => onOpenThread(s.id)}>

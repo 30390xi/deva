@@ -325,7 +325,7 @@ const zhCN: MessageTree = {
     setup: {
       title: '接入一个 AI 模型',
       intro:
-        '还没有可用的模型。选一个服务商、按提示拿到密钥，就能开始对话——全程在这里完成，密钥只加密保存在本机。',
+        '还没有可用的模型。选一个服务商、按提示拿到密钥，就能开始对话，密钥只加密保存在本机。',
       change: '更换',
       stepOpen: '打开官网并登录（没有账号先注册）',
       stepCreate: '在控制台找到「API Keys / API 密钥」，新建一个密钥',
@@ -1275,7 +1275,7 @@ const en: MessageTree = {
     setup: {
       title: 'Connect an AI model',
       intro:
-        'No model is available yet. Pick a provider, get an API key as shown, and you can start chatting — all from here. Keys are stored encrypted on this computer only.',
+        'No model is available yet. Pick a provider, get an API key as shown, and you can start chatting. Keys are stored encrypted on this computer only.',
       change: 'Change',
       stepOpen: 'Open the website and sign in (sign up first if needed)',
       stepCreate: 'In the console, find "API Keys" and create a new key',

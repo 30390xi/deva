@@ -217,6 +217,36 @@ body.cf-resizing-y * {
   box-shadow: var(--shadow);
   animation: cf-addmenu-pop 0.14s ease;
 }
+/* 「新建对话」角色列表变体：定宽（长名字 / 专长不撑宽浮层），角色多时限高内滚。 */
+.cf-addmenu__pop--scroll {
+  width: 248px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+}
+/* 角色项：头像 | 名字 / 专长两行，各自单行省略（同花名册行 .cf-prow）。 */
+.cf-addmenu__item--persona {
+  gap: 10px;
+  padding: 6px 8px;
+}
+.cf-addmenu__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cf-addmenu__name,
+.cf-addmenu__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cf-addmenu__name {
+  font-weight: 600;
+}
+.cf-addmenu__desc {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
 /* 宽度自适应变体：贴合内容宽度（配合项 white-space:nowrap），不再固定最小宽度。 */
 .cf-addmenu__pop--fit {
   min-width: 0;
@@ -352,7 +382,7 @@ body.cf-resizing-y * {
     animation: none;
   }
 }
-/* 顶部：搜索占满一行，角色 tab 再并排「添加」图标。
+/* 顶部：搜索占满一行，消息 / 角色 tab 再并排「新建对话」/「添加」图标。
    整行兼作左栏的窗口拖拽把手（补上非对话界面缺失的顶部拖拽区）；其中的交互控件另置 no-drag。 */
 .cf-rail__top {
   padding: var(--space-3);
@@ -513,10 +543,14 @@ body.cf-resizing-y * {
 .cf-prow__main {
   min-width: 0;
 }
+/* 角色名过长单行省略（同下方专长），否则长串会撑出左栏横向滚动条。 */
 .cf-prow__name {
   font-size: 13px;
   font-weight: 700;
   color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cf-prow__spec {
   margin-top: 1px;
@@ -673,10 +707,15 @@ body.cf-resizing-y * {
 .cf-idbtn:hover {
   background: var(--bg-hover);
 }
+/* 角色名过长单行省略，不压到右侧窗口控件区。 */
 .cf-idbtn__name {
+  min-width: 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cf-wschip {
   display: inline-flex;
@@ -1828,6 +1867,8 @@ body.cf-resizing-y * {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* 超长无断点的专长 / 任务标题（如一长串数字）在卡内任意处折行，不撑出横向滚动条。 */
+  overflow-wrap: anywhere;
 }
 .cf-profile__ava {
   --sz: 76px;
@@ -1846,16 +1887,26 @@ body.cf-resizing-y * {
   height: 100%;
   object-fit: cover;
 }
+/* 专长过长折行居中；角色名单行省略见 .cf-profile__clip（任务详情复用本类作标题，仍折行）。 */
 .cf-profile__name {
   margin-top: var(--space-3);
   font-size: 20px;
   font-weight: 750;
   color: var(--fg);
+  text-align: center;
 }
 .cf-profile__spec {
   margin-top: 4px;
   font-size: 13px;
   color: var(--fg-muted);
+  text-align: center;
+}
+/* 角色资料卡单行省略：角色名 /「与 xxx 的对话」/ 空态提示过长不换行，超出显示…（悬停 title 看全文）。 */
+.cf-profile__clip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cf-profile__meta {
   width: 100%;
