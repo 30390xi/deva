@@ -764,13 +764,12 @@
       </div>
       <div class="dl__cta">
         <a class="btn" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-gh"/></svg>全部版本与更新说明</a>
-        <span style="color:var(--fg-subtle);font-size:14px">已经装了的，在「设置 → 关于」里检查更新即可。</span>
       </div>
       <details>
         <summary>第一次打开被系统拦住？</summary>
         <ul>
           <li><b>Windows</b>：弹出「Windows 已保护你的电脑」时，点「更多信息」→「仍要运行」。</li>
-          <li><b>macOS</b>：提示无法验证开发者时，到「系统设置 → 隐私与安全性」里点「仍要打开」，每次升级后第一次打开都要放行一次；万一提示「已损坏」，在终端执行：
+          <li><b>macOS</b>：提示无法验证 Deva.app 是否包含恶意软件时，选择「完成」，前往「系统设置 → 隐私与安全性」点击「仍要打开」，然后重新打开 Deva 并在弹窗中确认。若提示应用「已损坏」或未出现「仍要打开」选项，在终端执行：
             <pre><code>xattr -cr /Applications/Deva.app</code></pre>
           </li>
         </ul>

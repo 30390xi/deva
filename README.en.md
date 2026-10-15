@@ -247,10 +247,6 @@ Download from [Releases](https://github.com/sqfcyily/deva/releases):
 | 🍎 macOS (Apple Silicon) | `Deva-x.y.z-arm64.dmg` | |
 | 🍎 macOS (Intel) | `Deva-x.y.z-x64.dmg` | |
 
-**Upgrading**: click "Check for updates" in "Settings → About". On Windows the update downloads and installs from inside the app after a restart; on macOS it downloads the new installer — quit Deva, then drag the new Deva into Applications to replace the old one. Older versions without this button can simply install the new release over the existing one. Settings, chats and other data live in `~/.deva` and are kept across upgrades.
-
-If you previously installed the MSI version, uninstall it from the system "Apps" settings before installing the exe, otherwise you'll end up with two separate programs (uninstalling doesn't touch your data in `~/.deva`).
-
 <details>
 <summary><b>Blocked by the system on first launch?</b></summary>
 
@@ -259,7 +255,7 @@ If you previously installed the MSI version, uninstall it from the system "Apps"
 The installers aren't officially signed yet (the macOS app only has a free ad-hoc signature), so the system may block the first launch:
 
 - **Windows**: when "Windows protected your PC" appears, click "More info" → "Run anyway"
-- **macOS**: if it says the developer can't be verified, go to "System Settings → Privacy & Security" and click "Open Anyway". You'll need to do this once after every upgrade; if a keychain access prompt appears, click "Always Allow". If it ever says the app is "damaged", run the following in Terminal and open it again:
+- **macOS**: if macOS cannot verify that Deva.app is free of malware, click "Done", go to "System Settings → Privacy & Security", click "Open Anyway", then reopen Deva and confirm. If prompted for keychain access, click "Always Allow". If the app is reported as "damaged" or "Open Anyway" is not shown, run the following in Terminal and reopen the app:
 
   ```bash
   xattr -cr /Applications/Deva.app
