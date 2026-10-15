@@ -52,6 +52,8 @@ import {
 } from 'lucide-react'
 import { BotsPane } from './BotsPane'
 import { UpdateSection } from './UpdateSection'
+// 关于页的应用图标：直接用安装包图标的源文件，图形只维护一份
+import devaIcon from '../../../../build/icon.svg'
 import './redesign.css'
 import type { McpKV, McpServer, McpStatus, Persona } from '../mock/extensions'
 import type {
@@ -5018,14 +5020,12 @@ function AboutPane(): React.JSX.Element {
     <>
       <h2 className="cf-pane__title">{t('settings.about')}</h2>
       <div className="cf-about">
-        <div className="cf-about__logo">
-          <span className="cf-brand__dot" />
-        </div>
+        <img className="cf-about__icon" src={devaIcon} alt="" aria-hidden />
         <div className="cf-about__name">{t('app.name')}</div>
         <div className="cf-about__ver">
           {t('settings.version')} {__APP_VERSION__}
         </div>
-        <p className="cf-about__desc">{t('app.tagline')}</p>
+        {t('app.tagline') && <p className="cf-about__desc">{t('app.tagline')}</p>}
         <UpdateSection />
       </div>
     </>
