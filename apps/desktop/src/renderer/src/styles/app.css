@@ -2540,6 +2540,8 @@ textarea {
 /* 状态徽标（已批准 / 继续完善）：右对齐、弱化观感。 */
 .msg__plan-badge {
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-muted);
@@ -2602,6 +2604,8 @@ textarea {
 }
 .msg__mount-badge {
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-muted);
