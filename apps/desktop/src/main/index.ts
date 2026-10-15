@@ -60,7 +60,9 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      webSecurity: true
+      webSecurity: true,
+      // 关掉 Chromium 拼写检查：输入多是中文夹杂模型名 / 代码 / 路径，满屏红波浪线只是噪音（也没做纠错菜单）
+      spellcheck: false
     }
   })
 

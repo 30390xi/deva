@@ -1787,9 +1787,16 @@ body.cf-resizing-y * {
 .cf-composer .model-pick {
   margin-left: auto;
 }
-/* 思考等级选择器紧随模型选择器：只让第一个吃掉左侧空白，两者并排贴右。 */
+/* 思考等级选择器紧贴模型选择器：只让第一个吃掉左侧空白；再抵掉工具条的 gap、收窄两枚贴片
+   相邻一侧的内边距，二者读作一组（贴片无底色，否则中间会空出一截比到发送键还宽的距离）。 */
 .cf-composer .model-pick + .model-pick {
-  margin-left: 0;
+  margin-left: calc(-1 * var(--space-1));
+}
+.cf-composer .model-pick:has(+ .model-pick) .chip {
+  padding-right: 4px;
+}
+.cf-composer .model-pick + .model-pick .chip {
+  padding-left: 4px;
 }
 /* 思考等级菜单项：档位名 + 一行说明。 */
 .cf-effort__text {
