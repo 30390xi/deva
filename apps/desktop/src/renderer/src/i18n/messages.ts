@@ -219,7 +219,7 @@ const zhCN: MessageTree = {
         max: '不计成本地深想，最慢最贵'
       },
       on: '开启',
-      onHint: '开启思考（该模型只能开，不能调深浅）'
+      onHint: '开启思考（该模型无法设置思考等级）'
     },
     empty: '有什么可以帮你？',
     emptyHint: '描述任务，Deva 会读写项目文件、按需请求授权来完成。',
@@ -511,7 +511,26 @@ const zhCN: MessageTree = {
     closeToTray: '关闭窗口时驻留托盘',
     models: '模型',
     about: '关于',
-    version: '版本'
+    version: '版本',
+    update: {
+      check: '检查更新',
+      checking: '正在检查…',
+      latest: '已是最新版本',
+      available: '发现新版本 {version}',
+      notes: '更新说明',
+      download: '下载更新',
+      downloadInstaller: '下载安装包',
+      manualHintMac: '下载后打开安装包，先退出 Deva，再把 Deva 拖进「应用程序」替换旧版。',
+      manualHint: '下载后运行安装包，直接覆盖安装即可。',
+      downloading: '正在下载 {percent}%',
+      downloaded: '新版本 {version} 已下载',
+      install: '重启并安装',
+      installHint: 'Deva 会关闭并安装新版本，装完自动重新打开；不点的话，下次退出 Deva 时也会装上。',
+      checkFailed: '检查更新失败',
+      downloadFailed: '下载更新失败',
+      retry: '重试',
+      openReleases: '前往下载页'
+    }
   },
   models: {
     title: '模型',
@@ -1151,7 +1170,7 @@ const en: MessageTree = {
         max: 'Thinks as hard as it can; slowest and most expensive'
       },
       on: 'On',
-      onHint: 'Turn thinking on (this model cannot adjust its depth)'
+      onHint: 'Turn thinking on (this model has no thinking levels)'
     },
     empty: 'How can I help?',
     emptyHint: 'Describe a task; Deva reads and writes project files, asking permission as needed.',
@@ -1447,7 +1466,28 @@ const en: MessageTree = {
     closeToTray: 'Keep in tray when window closes',
     models: 'Models',
     about: 'About',
-    version: 'Version'
+    version: 'Version',
+    update: {
+      check: 'Check for updates',
+      checking: 'Checking…',
+      latest: 'You’re on the latest version',
+      available: 'New version {version} available',
+      notes: 'Release notes',
+      download: 'Download update',
+      downloadInstaller: 'Download installer',
+      manualHintMac:
+        'Open the downloaded installer, quit Deva, then drag Deva into Applications to replace the old version.',
+      manualHint: 'Run the downloaded installer to install over the current version.',
+      downloading: 'Downloading {percent}%',
+      downloaded: 'Version {version} downloaded',
+      install: 'Restart and install',
+      installHint:
+        'Deva will close, install the new version, and reopen. If you skip this, it installs the next time you quit Deva.',
+      checkFailed: 'Couldn’t check for updates',
+      downloadFailed: 'Couldn’t download the update',
+      retry: 'Retry',
+      openReleases: 'Open downloads page'
+    }
   },
   models: {
     title: 'Models',

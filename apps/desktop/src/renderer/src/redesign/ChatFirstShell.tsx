@@ -51,6 +51,7 @@ import {
   X
 } from 'lucide-react'
 import { BotsPane } from './BotsPane'
+import { UpdateSection } from './UpdateSection'
 import './redesign.css'
 import type { McpKV, McpServer, McpStatus, Persona } from '../mock/extensions'
 import type {
@@ -1432,7 +1433,9 @@ function GitWidget({ root, streaming }: { root: string; streaming: boolean }): R
         disabled={opBusy}
       >
         <GitBranch size={13} />
-        <span className="cf-gitchip__branch">{label}</span>
+        <span className="cf-gitchip__branch" title={label}>
+          {label}
+        </span>
         {status.mergeInProgress && <span className="cf-gitchip__merge">{t('cf.git.merging')}</span>}
         {(status.ahead > 0 || status.behind > 0) && (
           <span className="cf-gitchip__ab">
@@ -1533,7 +1536,7 @@ function WorkspaceMenu({ root }: { root: string }): React.JSX.Element {
         onClick={openMenu}
       >
         <FolderOpen size={15} />
-        {basename(root)}
+        <span className="cf-wschip__name">{basename(root)}</span>
       </button>
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} openUp items={items} onClose={() => setMenu(null)} />
@@ -5023,6 +5026,7 @@ function AboutPane(): React.JSX.Element {
           {t('settings.version')} {__APP_VERSION__}
         </div>
         <p className="cf-about__desc">{t('app.tagline')}</p>
+        <UpdateSection />
       </div>
     </>
   )

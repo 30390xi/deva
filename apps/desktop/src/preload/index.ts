@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { EffortLevel } from '../shared/effort'
+import type { UpdateState } from '../shared/update'
 
 /** 目录项（单层）。 */
 export interface DirEntry {
@@ -1141,6 +1142,21 @@ const api = {
     readText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
     writeText: (text: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('clipboard:write-text', text)
+  },
+  /**
+   * 检查更新（设置 → 关于）。状态由主进程持有，经 onState 推送；check / download / install 只负责触发。
+   * download：Windows exe 安装的在应用内下载，其余在浏览器里打开安装包直链。
+   */
+  update: {
+    getState: (): Promise<UpdateState> => ipcRenderer.invoke('update:get-state'),
+    check: (): Promise<void> => ipcRenderer.invoke('update:check'),
+    download: (): Promise<void> => ipcRenderer.invoke('update:download'),
+    install: (): Promise<void> => ipcRenderer.invoke('update:install'),
+    onState: (cb: (state: UpdateState) => void): (() => void) => {
+      const listener = (_e: unknown, state: UpdateState): void => cb(state)
+      ipcRenderer.on('update:state', listener)
+      return () => ipcRenderer.removeListener('update:state', listener)
+    }
   },
   /** 远程通道 / 手机端（飞书、Telegram 等 IM 机器人）。密钥只写不读。 */
   remote: {

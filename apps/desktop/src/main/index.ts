@@ -26,6 +26,7 @@ import { registerClipboardIpc } from './services/clipboard'
 import { registerTasksIpc } from './services/tasks'
 import { startScheduler } from './services/scheduler'
 import { registerRemoteIpc, stopAllChannels } from './services/remote'
+import { registerUpdaterIpc } from './services/updater'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -290,6 +291,9 @@ if (!app.requestSingleInstanceLock()) {
 
   // 定时任务 / 自动任务（全局 ~/.deva/tasks.json；创建时批准、执行时零交互）。
   registerTasksIpc(() => mainWindow)
+
+  // 检查更新（设置 → 关于；只在用户点按钮时检查，Windows exe 安装的可应用内下载并覆盖安装）
+  registerUpdaterIpc(() => mainWindow)
 
   createWindow()
 

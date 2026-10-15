@@ -221,6 +221,7 @@ When a conversation is about to fill the model's context window, earlier content
 
 - Delete chat history by "turn": right-click in the chat and choose "Delete this turn" or "Select to delete"; deleted content is no longer seen by the model either
 - Light / dark / follow system theme; 简体中文 / English
+- Check for updates in "Settings → About": on Windows the new version downloads and installs from inside the app; on macOS you get the new installer
 
 ---
 
@@ -241,21 +242,22 @@ Download from [Releases](https://github.com/sqfcyily/deva/releases):
 | System | File | Notes |
 | --- | --- | --- |
 | 🪟 Windows | `Deva-x.y.z-setup.exe` | Double-click to install |
-| 🪟 Windows MSI | `Deva-x.y.z.msi` | Supports Group Policy or silent install via `msiexec` |
 | 🍎 macOS (Apple Silicon) | `Deva-x.y.z-arm64.dmg` | |
 | 🍎 macOS (Intel) | `Deva-x.y.z-x64.dmg` | |
 
-Install either the exe or the msi — installing both results in two separate programs.
+**Upgrading**: click "Check for updates" in "Settings → About". On Windows the update downloads and installs from inside the app after a restart; on macOS it downloads the new installer — quit Deva, then drag the new Deva into Applications to replace the old one. Older versions without this button can simply install the new release over the existing one. Settings, chats and other data live in `~/.deva` and are kept across upgrades.
+
+If you previously installed the MSI version, uninstall it from the system "Apps" settings before installing the exe, otherwise you'll end up with two separate programs (uninstalling doesn't touch your data in `~/.deva`).
 
 <details>
 <summary><b>Blocked by the system on first launch?</b></summary>
 
 <br />
 
-The installers are currently unsigned, so the system may block the first launch:
+The installers aren't officially signed yet (the macOS app only has a free ad-hoc signature), so the system may block the first launch:
 
 - **Windows**: when "Windows protected your PC" appears, click "More info" → "Run anyway"
-- **macOS**: if it says the app can't be opened, go to "System Settings → Privacy & Security" and click "Open Anyway"; if it says the app is "damaged", run the following in Terminal and open it again:
+- **macOS**: if it says the developer can't be verified, go to "System Settings → Privacy & Security" and click "Open Anyway". You'll need to do this once after every upgrade; if a keychain access prompt appears, click "Always Allow". If it ever says the app is "damaged", run the following in Terminal and open it again:
 
   ```bash
   xattr -cr /Applications/Deva.app
@@ -273,7 +275,6 @@ Requires Node.js 20+ and pnpm:
 pnpm install
 pnpm dev               # start in development mode
 pnpm package:win       # build Windows installer (exe)
-pnpm package:win:msi   # build Windows MSI installer
 pnpm package:mac       # build macOS installer
 ```
 
