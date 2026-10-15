@@ -1732,6 +1732,21 @@ body.cf-resizing-y * {
 .cf-composer .model-pick {
   margin-left: auto;
 }
+/* 思考等级选择器紧随模型选择器：只让第一个吃掉左侧空白，两者并排贴右。 */
+.cf-composer .model-pick + .model-pick {
+  margin-left: 0;
+}
+/* 思考等级菜单项：档位名 + 一行说明。 */
+.cf-effort__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cf-effort__hint {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--fg-subtle);
+}
 .cf-send {
   display: inline-flex;
   align-items: center;

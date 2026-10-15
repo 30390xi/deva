@@ -181,7 +181,9 @@ export function StatusIndicator({
             ? t('chat.work.autoContext')
             : reason === 'output_limit'
               ? t('chat.work.autoOutputLimit')
-              : t('chat.work.reconnecting')
+              : reason === 'effort'
+                ? t('chat.work.autoEffort')
+                : t('chat.work.reconnecting')
     return (
       <div className="chat__status is-reconnecting" role="status" aria-live="polite">
         <Loader2 size={14} className="spin" />

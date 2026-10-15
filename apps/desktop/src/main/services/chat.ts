@@ -4,7 +4,15 @@ import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { streamChat } from '../providers'
-import type { ContentPart, Message, StopReason, ToolSpec } from '../providers/types'
+import {
+  isEffortLevel,
+  type ContentPart,
+  type EffortLevel,
+  type Message,
+  type StopReason,
+  type ToolSpec
+} from '../providers/types'
+import { clampEffort, effortRequest, type EffortRequest } from '../../shared/effort'
 import {
   executeTool,
   isMcpTool,
@@ -144,6 +152,8 @@ export interface ChatSendRequest {
    * 对话）。runTurn 经 resolveModelRef(session.model, model) 解析，删除的模型自动回落 model（全局默认）。
    */
   modelRef?: string
+  /** 本对话生效的思考等级：发送时恒带上并落库（同 modelRef，防别处切换串到本对话）；缺省 = 不改。 */
+  effort?: EffortLevel
 }
 
 /** 手动 /compact 请求：无用户文本、无后续模型轮，只压缩历史并回发结果事件。 */
@@ -177,6 +187,12 @@ interface ChatCreateSessionRequest {
 interface ChatSetModelRequest {
   sessionId: string
   modelRef: string
+}
+
+/** 对话输入框切换本对话思考等级（立即落库，不等下一次发送）。见 chat:set-effort。 */
+interface ChatSetEffortRequest {
+  sessionId: string
+  effort: EffortLevel
 }
 
 /** 挂载 / 卸载本对话的聚焦工作区（立即落库，不等下一次发送）。见 chat:set-focus。 */
@@ -950,7 +966,8 @@ export type ChatStreamEvent =
   /**
    * 引擎正在自愈（transient，同 reconnecting 一样显示为状态横幅，任何真实内容到达即收起）：
    * truncated=输出撞上长度上限，已引导模型续写 / 拆小；empty=上一步无任何输出，已追问；
-   * context=上下文超限，已压缩后重试；output_limit=输出预算超出模型允许范围，已降档重发。
+   * context=上下文超限，已压缩后重试；output_limit=输出预算超出模型允许范围，已降档重发；
+   * effort=模型 / 网关不认所选思考等级，已去掉该参数重发。
    */
   | { type: 'auto_retry'; reason: AutoRetryReason; attempt: number; max: number }
   | { type: 'error'; kind: string; message: string }
@@ -1006,7 +1023,7 @@ const MAX_STEPS = Infinity
 const MAX_RECONNECT = 6
 const RECONNECT_MAX_DELAY_MS = 30_000
 
-export type AutoRetryReason = 'truncated' | 'empty' | 'context' | 'output_limit'
+export type AutoRetryReason = 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
 
 /**
  * 每步输出预算（max_tokens）。旧的固定 8192 对带思考的新模型太小：思考吃光预算、一字未出就撞限，
@@ -1020,6 +1037,28 @@ function outputBudget(model: { providerId: string; model: string }): number | un
   const key = `${model.providerId}:${model.model}`
   if (outputBudgetDowngraded.has(key)) return OUTPUT_BUDGET_SAFE
   return /claude/i.test(model.model) ? OUTPUT_BUDGET_WIDE : undefined
+}
+
+/**
+ * 被拒过的思考等级（键 `providerId:model:level`）：某模型 / 网关不认该档参数（400 effort_unsupported）则进程内
+ * 记住，此后按「默认」发（不带参数），同 outputBudgetDowngraded。键带档位：OpenAI 系常只缺 xhigh，换低一档仍可用。
+ */
+const effortRejected = new Set<string>()
+function effortKey(model: { providerId: string; model: string }, level: EffortLevel): string {
+  return `${model.providerId}:${model.model}:${level}`
+}
+/**
+ * 本次请求实际要发的思考参数：先按模型能力表把对话存的档位收敛到该模型支持的档（shared/effort.ts），
+ * 再取该档的请求参数（格式按协议 + 服务地址判定）。'default' / 缺省 / 模型不支持 / 已被拒 → undefined。
+ */
+function sentEffort(
+  model: ChatModelConfig,
+  level: EffortLevel | undefined
+): { level: EffortLevel; req: EffortRequest } | undefined {
+  const lv = clampEffort(model.adapter, model.model, level ?? 'default')
+  const req = effortRequest(model.adapter, model.model, model.baseURL, lv)
+  if (!req || effortRejected.has(effortKey(model, lv))) return undefined
+  return { level: lv, req }
 }
 
 /**
@@ -1742,6 +1781,8 @@ interface AgentLoopArgs {
   tools: ToolSpec[]
   /** 模型配置（adapter / provider / baseURL / model）。 */
   model: ChatModelConfig
+  /** 思考等级（缺省 = 'default'，不发思考参数）。子智能体跟随父轮。 */
+  effort?: EffortLevel
   /** 工具执行上下文（workspaceRoot + 取消信号）。 */
   ctx: ToolContext
   /** 取消控制器：其 signal 贯穿流式与工具执行。 */
@@ -1966,6 +2007,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       system,
       tools,
       model,
+      effort,
       ctx,
       controller,
       maxSteps,
@@ -2095,9 +2137,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           history: rec.messages,
           system: rec.system,
           tools: rec.tools,
-          // 子智能体恒跟随主对话（继承本轮模型）。
+          // 子智能体恒跟随主对话（继承本轮模型与思考等级）。
           model,
-          ctx: bg ? { workspaceRoot: ctx.workspaceRoot, signal: bg.signal } : ctx,
+          effort,
+          ctx: bg ?{ workspaceRoot: ctx.workspaceRoot, signal: bg.signal } : ctx,
           controller: bg ?? controller,
           maxSteps: MAX_STEPS,
           depth: depth + 1,
@@ -2373,6 +2416,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         // 不可重试错误先扣下、不立即画红框：其中几类引擎能自愈（输出预算降档、上下文压缩后重发），
         // 流结束后再定夺；自愈不了才上报。
         let fatalErr: { kind: string; message: string } | null = null
+        // 每次（含重发）现算：本步刚因不认思考等级被拒时，重发即不再带该参数。
+        const stepEffort = sentEffort(model, effort)
 
         for await (const ev of streamChat(
           { adapter: model.adapter, providerId: model.providerId, baseURL: model.baseURL },
@@ -2383,6 +2428,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             tools,
             signal: controller.signal,
             maxTokens: outputBudget(model),
+            effort: stepEffort?.req,
             // 工具循环每步都要把 system + tools + 全量历史整个重发一遍，是提示缓存最典型的受益者
             // （Anthropic 才需显式断点；OpenAI/DeepSeek 自动命中，此开关对它们无作用）。
             // 子智能体同样走这里：其 system/tools 与主轮不同，自成一套缓存条目，各缓各的。
@@ -2464,6 +2510,18 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           break reconnect
         }
         if (fatal && fatalErr) {
+          // 自愈⓪：模型 / 网关不认所选思考等级 → 记住，去掉该参数重发本步（不计入重连次数）。
+          // 只认本步确实带了参数的情形（适配器据此才会归出该类），故不会空转。
+          if (fatalErr.kind === 'effort_unsupported' && stepEffort) {
+            effortRejected.add(effortKey(model, stepEffort.level))
+            console.warn('[chat] 思考等级被拒，按默认重发：', fatalErr.message)
+            if (!isSub) {
+              emit(turnId, sessionId, { type: 'auto_retry', reason: 'effort', attempt: 1, max: 1 })
+              emit(turnId, sessionId, { type: 'stream_reset' })
+            }
+            attempt--
+            continue reconnect
+          }
           // 自愈①：输出预算超出该模型允许范围 → 记住并降回保守值，重发本步（不计入重连次数）。
           const key = `${model.providerId}:${model.model}`
           if (fatalErr.kind === 'output_limit' && !outputBudgetDowngraded.has(key)) {
@@ -3134,6 +3192,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         ),
         tools: turnTools,
         model: turnModel,
+        effort: session.effort,
         ctx,
         controller,
         maxSteps: MAX_STEPS,
@@ -3375,11 +3434,17 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       attachments,
       personaId,
       focusRoot,
-      modelRef
+      modelRef,
+      effort
     } = payload
-    // 首发绑定 persona / 聚焦工作区 / 本对话模型（ensureSession：personaId 一次性绑定，focusRoot 与 model
-    // 可后续更新——model 承载「新建快照角色偏好 + 聊天中切换」，显式提供即落库，仅影响本对话）。
-    const session = ensureSession(sessionId, { personaId, focusRoot, model: modelRef })
+    // 首发绑定 persona / 聚焦工作区 / 本对话模型与思考等级（ensureSession：personaId 一次性绑定，focusRoot、
+    // model 与 effort 可后续更新——model 承载「新建快照角色偏好 + 聊天中切换」，显式提供即落库，仅影响本对话）。
+    const session = ensureSession(sessionId, {
+      personaId,
+      focusRoot,
+      model: modelRef,
+      effort: isEffortLevel(effort) ? effort : undefined
+    })
     // 发送前自愈：旧版本 / 崩溃遗留的悬空 tool_use 会让这次请求直接 400（此后每次都 400）。
     // 回合进行中不碰——那时的「悬空」是工具正在执行，不是残缺。
     if (!busySessions.has(sessionId)) repairDanglingToolUses(session)
@@ -3525,6 +3590,16 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     const session = getSession(payload.sessionId)
     if (session) {
       session.model = payload.modelRef
+      saveProject(payload.sessionId)
+    }
+    return { ok: true }
+  })
+
+  // 对话输入框切换思考等级：同 set-model——立即落库到本对话，惰性未建档的会话跳过（随首发落库），不改 updatedAt。
+  ipcMain.handle('chat:set-effort', (_e, payload: ChatSetEffortRequest): { ok: true } => {
+    const session = getSession(payload.sessionId)
+    if (session && isEffortLevel(payload.effort)) {
+      session.effort = payload.effort
       saveProject(payload.sessionId)
     }
     return { ok: true }

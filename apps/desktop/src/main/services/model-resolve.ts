@@ -1,4 +1,5 @@
 import { getConfig } from './config'
+import { isEffortLevel, type EffortLevel } from '../providers/types'
 
 /**
  * 模型引用解析（主进程）。子智能体可指定一个「已配置模型」运行，其引用格式与全局默认模型一致：
@@ -94,5 +95,18 @@ export function resolveDefaultModel(): ResolvedModel | null {
     return resolveRefStrict(active)
   } catch {
     return null
+  }
+}
+
+/**
+ * 解析全局「最近使用」思考等级（`config.models.activeEffort`，用户最近一次在对话输入框选定的档位）。
+ * 供不经渲染层的发送（远程通道）给尚未定格思考等级的对话兜底。无配置 / 非法值 → 'default'（不发思考参数）。
+ */
+export function resolveDefaultEffort(): EffortLevel {
+  try {
+    const models = (getConfig().models ?? {}) as { activeEffort?: unknown }
+    return isEffortLevel(models.activeEffort) ? models.activeEffort : 'default'
+  } catch {
+    return 'default'
   }
 }

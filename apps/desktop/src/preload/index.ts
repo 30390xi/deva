@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { EffortLevel } from '../shared/effort'
 
 /** 目录项（单层）。 */
 export interface DirEntry {
@@ -20,6 +21,9 @@ export interface ReadFileResult {
   tooLarge?: boolean
   binary?: boolean
 }
+
+/** 思考等级：定义在主进程 / 渲染层共用模块（含模型能力表），此处转出供渲染层按既有方式取用。 */
+export type { EffortLevel }
 
 /** 会话「线缆类型」：与主进程 providers/chat 结构一致，按既定模式在 preload 内复述。 */
 export interface ChatModelConfig {
@@ -45,6 +49,8 @@ export interface ChatSendRequest {
    * 缺省 = 不改动已存值；空串 = 显式回落全局默认。删除的模型由主进程 resolveModelRef 自动回落默认。
    */
   modelRef?: string
+  /** 本对话生效的思考等级：发送时恒带上并落库（同 modelRef）。缺省 = 不改动已存值。 */
+  effort?: EffortLevel
 }
 
 /** 手动 /compact 压缩请求（无用户文本、无后续模型轮；locale 在主进程解析）。 */
@@ -70,6 +76,12 @@ export interface ChatCreateSessionRequest {
 export interface ChatSetModelRequest {
   sessionId: string
   modelRef: string
+}
+
+/** 对话输入框切换本对话思考等级：立即落库（会话尚未建档则不建档，由覆盖层随首发落库）。 */
+export interface ChatSetEffortRequest {
+  sessionId: string
+  effort: EffortLevel
 }
 
 /** 挂载 / 卸载本对话的聚焦工作区：立即落库（会话尚未建档则不建档，由覆盖层随首发落库）。 */
@@ -105,6 +117,8 @@ export interface ChatSessionMeta {
   focusRoot?: string | null
   /** 本对话模型引用 `"providerId:modelId"`；空串/缺省 = 跟随全局默认。见 ChatSendRequest.modelRef。 */
   model?: string
+  /** 本对话思考等级；缺省 = 尚未定格（渲染层打开时定格为「最近使用」）。 */
+  effort?: EffortLevel
 }
 
 /** 角色名片草稿（与 services/chat.ts 的 AgentDraft 对齐）。 */
@@ -660,7 +674,12 @@ export type ChatStreamEvent =
   | { type: 'usage'; input: number; output: number; cacheRead?: number; cacheWrite?: number }
   | { type: 'reconnecting'; attempt: number; max: number }
   /** 引擎自愈中（截断续写 / 空回合追问 / 上下文压缩重试 / 输出预算降档），显示为状态横幅。 */
-  | { type: 'auto_retry'; reason: 'truncated' | 'empty' | 'context' | 'output_limit'; attempt: number; max: number }
+  | {
+      type: 'auto_retry'
+      reason: 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
+      attempt: number
+      max: number
+    }
   | { type: 'stream_reset' }
   | { type: 'error'; kind: string; message: string }
   /** 上下文压缩结果（自动或手动 /compact）。 */
@@ -886,6 +905,9 @@ const api = {
     /** 切换本对话模型并立即落库（不等下一次发送）。 */
     setModel: (req: ChatSetModelRequest): Promise<{ ok: true }> =>
       ipcRenderer.invoke('chat:set-model', req),
+    /** 切换本对话思考等级并立即落库（不等下一次发送）。 */
+    setEffort: (req: ChatSetEffortRequest): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('chat:set-effort', req),
     /** 挂载 / 卸载本对话的聚焦工作区并立即落库（不等下一次发送）。 */
     setFocus: (req: ChatSetFocusRequest): Promise<{ ok: true }> =>
       ipcRenderer.invoke('chat:set-focus', req),

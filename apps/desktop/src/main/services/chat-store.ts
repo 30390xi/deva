@@ -10,7 +10,7 @@ import {
 } from 'fs'
 import { join } from 'path'
 import { getDevaHome } from './config'
-import type { Message } from '../providers/types'
+import type { EffortLevel, Message } from '../providers/types'
 import type { CheckpointRec } from './checkpoints'
 import type { TodoEntry } from './todos'
 
@@ -67,6 +67,11 @@ export interface StoredSession {
    * 日后改角色偏好模型不影响已建对话。偏好模型被删除时，runTurn 经 resolveModelRef 回落全局默认。
    */
   model?: string
+  /**
+   * 本对话的思考等级（与 model 同一套：对话输入框切换即落库，发送时恒记下生效值）。
+   * 缺省 = 尚未定格——runTurn 按 'default'（不发思考参数）处理；渲染层打开对话时会把「最近使用」定格进来。
+   */
+  effort?: EffortLevel
   /**
    * 角色名片（propose_agent 提议）的终态边车，按 toolUseId 记录 accepted/rejected。
    * 名片本体随 Message[] 天然存活，但其接受/拒绝终态无处落——此边车确保重开不退回 pending、
@@ -176,6 +181,8 @@ export interface ChatSessionMeta {
   focusRoot?: string | null
   /** 本对话的模型引用 `"providerId:modelId"`；空串/缺省 = 跟随全局默认。见 StoredSession.model。 */
   model?: string
+  /** 本对话的思考等级。见 StoredSession.effort。 */
+  effort?: EffortLevel
 }
 
 /**
@@ -228,7 +235,8 @@ function metaOf(s: StoredSession): ChatSessionMeta {
     updatedAt: s.updatedAt,
     personaId: s.personaId,
     focusRoot: s.focusRoot ?? null,
-    model: s.model
+    model: s.model,
+    effort: s.effort
   }
 }
 
@@ -349,10 +357,11 @@ export function getSession(id: string): StoredSession | undefined {
  * （**绝不覆盖**已绑定值），focusRoot 可由 mountFocus 后续更新（显式提供即应用，含 null 卸载）。
  * `opts.model`：本对话模型引用（快照固定）——新建时写入角色偏好快照；已存在会话显式提供即应用（聊天中
  * 切换模型，与 focusRoot 同为「可变·显式即覆盖」；空串=显式回落全局默认）。见 StoredSession.model。
+ * `opts.effort`：本对话思考等级，同 model「可变·显式即覆盖」。见 StoredSession.effort。
  */
 export function ensureSession(
   id: string,
-  opts?: { personaId?: string; focusRoot?: string | null; model?: string }
+  opts?: { personaId?: string; focusRoot?: string | null; model?: string; effort?: EffortLevel }
 ): StoredSession {
   let s = loadSessionFile(id)
   if (!s) {
@@ -365,7 +374,8 @@ export function ensureSession(
       messages: [],
       personaId: opts?.personaId,
       focusRoot: opts?.focusRoot ?? null,
-      model: opts?.model
+      model: opts?.model,
+      effort: opts?.effort
     }
     sessionCache.set(id, s)
     ensureIndex().set(id, metaOf(s))
@@ -376,6 +386,7 @@ export function ensureSession(
     if (opts && opts.focusRoot !== undefined) s.focusRoot = opts.focusRoot
     // model：可变（聊天中切换），显式提供即应用（空串=回落默认）；未提供（undefined）则不动。
     if (opts && opts.model !== undefined) s.model = opts.model
+    if (opts && opts.effort !== undefined) s.effort = opts.effort
   }
   return s
 }

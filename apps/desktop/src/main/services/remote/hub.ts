@@ -9,7 +9,7 @@ import {
 import { getChatRuntime, type ChatStreamEvent } from '../chat'
 import { ensureSession, getSession, listSessions, save as saveSession } from '../chat-store'
 import { getPersona, listPersonas, upsertPersona, type PersonaRecord } from '../personas'
-import { resolveDefaultModel, resolveModelRefOrNull } from '../model-resolve'
+import { resolveDefaultEffort, resolveDefaultModel, resolveModelRefOrNull } from '../model-resolve'
 import { previewSchedule } from '../tasks'
 import type { TaskCreateInput } from '../tasks-types'
 import { paginate } from './paginate'
@@ -388,7 +388,8 @@ const RETRY_TEXT: Record<string, string> = {
   truncated: '回复被截断，正在续写',
   empty: '上一步没有输出，正在追问',
   context: '上下文超限，压缩后重试',
-  output_limit: '输出预算超限，降档重试'
+  output_limit: '输出预算超限，降档重试',
+  effort: '模型不支持所选思考等级，按默认重试'
 }
 
 /** 把一个流事件并入回合视图。返回是否有可见变化。 */
@@ -1108,8 +1109,9 @@ async function sendToSession(chat: ChatAddress, text: string): Promise<void> {
       text,
       model,
       workspaceRoot: null,
-      // 与桌面同：记下这一轮实际使用的模型，此后本对话固定用它。
-      modelRef: `${model.providerId}:${model.model}`
+      // 与桌面同：记下这一轮实际使用的模型与思考等级，此后本对话固定用它们。
+      modelRef: `${model.providerId}:${model.model}`,
+      effort: session?.effort ?? resolveDefaultEffort()
     })
     const t = ensureTrack(turnId, sid, true)
     addPost(t, chat)

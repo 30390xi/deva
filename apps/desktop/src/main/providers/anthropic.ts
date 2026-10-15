@@ -138,6 +138,11 @@ export async function* streamAnthropic(
     // 输出上限：未指定时给 8192（现代 Claude 模型普遍支持，显著降低长回复被截断的概率）。
     max_tokens: req.maxTokens ?? 8192,
     temperature: req.temperature,
+    // 思考等级：adaptive 由模型自定想多少，effort 定深浅。display:'summarized' 让新模型返回可读的思考摘要
+    //（它们默认 omitted，思考块文本为空，界面上只见一段沉默）。未选等级时两字段为 undefined、序列化即省略。
+    // 思考块不回放（不进历史）：本应用会压缩 / 回滚 / 删轮、每轮注入记忆快照，回放签名块反会撞前缀校验。
+    thinking: req.effort ? { type: 'adaptive', display: 'summarized' } : undefined,
+    output_config: req.effort ? { effort: req.effort.effort } : undefined,
     stream: true
   }
 
@@ -165,7 +170,10 @@ export async function* streamAnthropic(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    yield { type: 'error', error: httpError(res.status, text, res.headers.get('retry-after')) }
+    yield {
+      type: 'error',
+      error: httpError(res.status, text, res.headers.get('retry-after'), Boolean(req.effort))
+    }
     yield { type: 'done', stopReason: 'error' }
     return
   }

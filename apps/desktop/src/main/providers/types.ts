@@ -80,6 +80,10 @@ export type StopReason =
   | 'aborted'
   | 'error'
 
+// 思考等级的档位定义与模型能力表在主进程 / 渲染层共用模块里（见 shared/effort.ts）。
+export { isEffortLevel, type EffortLevel } from '../../shared/effort'
+import type { EffortRequest } from '../../shared/effort'
+
 export interface GenerateRequest {
   model: string
   system?: string
@@ -95,6 +99,13 @@ export interface GenerateRequest {
    * 一次性调用（压缩摘要、生成提交信息）打了断点只会白付 1.25 倍缓存写入费，故默认关闭。
    */
   cache?: boolean
+  /**
+   * 思考参数（已按模型能力表收敛、映射好，见 shared/effort.ts 的 effortRequest）。
+   * 缺省 = 不发任何思考 / 推理参数，请求体与改造前逐字节一致。适配器按 format 放进各家字段：
+   * standard → Anthropic adaptive thinking + output_config.effort / OpenAI Chat reasoning_effort /
+   * Responses reasoning.effort；deepseek / zai / qwen（仅 OpenAI Chat）→ 各家私有开关 + 可选 reasoning_effort。
+   */
+  effort?: EffortRequest
 }
 
 export type ErrorKind =
@@ -105,6 +116,8 @@ export type ErrorKind =
   | 'invalid_request'
   /** max_tokens 超出模型允许的输出上限：引擎会自动降档重发。 */
   | 'output_limit'
+  /** 模型 / 网关不认所发的思考等级参数：引擎会记住并去掉该参数重发。 */
+  | 'effort_unsupported'
   | 'server'
   | 'aborted'
   | 'unknown'
@@ -201,8 +214,24 @@ export function isOutputLimitRejection(status: number, body: string): boolean {
   return status === 400 && /max_(output_)?tokens/i.test(body)
 }
 
-/** HTTP 状态码 → 归一化错误。retryAfter 为响应头 retry-after 原值（可选）。 */
-export function httpError(status: number, body: string, retryAfter?: string | null): NormalizedError {
+/**
+ * 请求被拒是否因为思考等级参数（reasoning_effort / output_config.effort / adaptive thinking 等）不被该模型
+ * 或网关接受。只在请求确实带了这些参数时才作此判定（effortSent），否则同样字眼的 400 照常归类。
+ */
+function isEffortRejection(status: number, body: string): boolean {
+  return status === 400 && /reasoning_effort|reasoning|effort|output_config|thinking|adaptive/i.test(body)
+}
+
+/**
+ * HTTP 状态码 → 归一化错误。retryAfter 为响应头 retry-after 原值（可选）；
+ * effortSent = 本次请求带了思考等级参数（见 GenerateRequest.effort）。
+ */
+export function httpError(
+  status: number,
+  body: string,
+  retryAfter?: string | null,
+  effortSent?: boolean
+): NormalizedError {
   if (isOutputLimitRejection(status, body))
     return {
       kind: 'output_limit',
@@ -217,6 +246,13 @@ export function httpError(status: number, body: string, retryAfter?: string | nu
       retryable: true,
       message: `触发限流（429），请稍后重试${bodyHint(body)}`,
       retryAfterMs: parseRetryAfter(retryAfter)
+    }
+  // 须在 context_length 之前：后者的正则很宽（token / maximum…），参数被拒的报错常被它误吞。
+  if (effortSent && isEffortRejection(status, body))
+    return {
+      kind: 'effort_unsupported',
+      retryable: false,
+      message: `该模型不支持所选思考等级（${status}）${bodyHint(body)}`
     }
   if (status === 400 && /context|token|length|maximum/i.test(body))
     return {

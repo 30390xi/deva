@@ -12,6 +12,7 @@ import {
   type StopReason,
   type StreamEvent
 } from './types'
+import type { EffortRequest } from '../../shared/effort'
 
 /**
  * OpenAI Chat Completions 风味适配器（兼容 DeepSeek / Moonshot / 智谱 / Qwen / Ollama 等）。
@@ -28,6 +29,8 @@ interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null | OpenAIContentPart[]
   tool_call_id?: string
+  /** DeepSeek 思考模式下回放的助手消息必须带此字段（本应用不留思维链，补空串），见 thinkingFields。 */
+  reasoning_content?: string
   tool_calls?: {
     id: string
     type: 'function'
@@ -102,6 +105,25 @@ function mapMessages(system: string | undefined, messages: Message[]): OpenAIMes
   return out
 }
 
+/**
+ * 思考参数 → OpenAI Chat 请求字段（格式见 shared/effort.ts 的 ThinkFormat）。未选等级时返回空对象，
+ * 请求体与改造前逐字节一致。国产家族先发各自的开思考开关，能调档的再附标准 reasoning_effort。
+ */
+function thinkingFields(e: EffortRequest | undefined): Record<string, unknown> {
+  if (!e) return {}
+  const effort = e.effort ? { reasoning_effort: e.effort } : {}
+  switch (e.format) {
+    case 'deepseek':
+      return { thinking: { type: 'enabled' }, ...effort }
+    case 'zai':
+      return { thinking: { type: 'enabled', clear_thinking: false }, ...effort }
+    case 'qwen':
+      return { enable_thinking: true, ...effort }
+    default:
+      return effort
+  }
+}
+
 function mapFinishReason(raw: string | null | undefined): StopReason {
   switch (raw) {
     case 'stop':
@@ -129,15 +151,22 @@ export async function* streamOpenAI(
   req: GenerateRequest
 ): AsyncGenerator<StreamEvent> {
   const url = `${cfg.baseURL.replace(/\/$/, '')}/chat/completions`
+  const messages = mapMessages(req.system, req.messages)
+  // DeepSeek 思考模式要求每条回放的助手消息都带 reasoning_content（缺了即 400）。本应用不留思维链，
+  // 补空串即可满足（pi-ai 同样如此兜底）。
+  if (req.effort?.reasoningField)
+    for (const m of messages) if (m.role === 'assistant') m.reasoning_content ??= ''
   const body = {
     model: req.model,
-    messages: mapMessages(req.system, req.messages),
+    messages,
     tools: req.tools?.map((t) => ({
       type: 'function' as const,
       function: { name: t.name, description: t.description, parameters: t.inputSchema }
     })),
     temperature: req.temperature,
     max_tokens: req.maxTokens,
+    // 思考等级（已按模型能力表映射）。不认这些参数的服务商会 400，引擎记住后去掉重发。
+    ...thinkingFields(req.effort),
     stream: true,
     stream_options: { include_usage: true }
   }
@@ -165,7 +194,10 @@ export async function* streamOpenAI(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    yield { type: 'error', error: httpError(res.status, text, res.headers.get('retry-after')) }
+    yield {
+      type: 'error',
+      error: httpError(res.status, text, res.headers.get('retry-after'), Boolean(req.effort))
+    }
     yield { type: 'done', stopReason: 'error' }
     return
   }

@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react'
 import type {
+  EffortLevel,
   TaskCreateInput,
   ResolveAutotaskResult,
   RewindApplyResult,
@@ -223,6 +224,8 @@ export interface SessionMeta {
   focusRoot?: string | null
   /** 本对话模型引用 `"providerId:modelId"`；空串/缺省 = 跟随全局默认。见 chat store 的 bindings.model。 */
   model?: string
+  /** 本对话思考等级；缺省 = 尚未定格（打开时定格为「最近使用」）。见 chat store 的 bindings.effort。 */
+  effort?: EffortLevel
 }
 
 /** send 接受的附件（路径给主进程读取，名称/类型用于本地乐观气泡）。 */
@@ -310,7 +313,12 @@ type StreamEvent =
   | { type: 'mount_request'; key: string; tool: string; path: string }
   | { type: 'usage'; input: number; output: number; cacheRead?: number; cacheWrite?: number }
   | { type: 'reconnecting'; attempt: number; max: number }
-  | { type: 'auto_retry'; reason: 'truncated' | 'empty' | 'context' | 'output_limit'; attempt: number; max: number }
+  | {
+      type: 'auto_retry'
+      reason: 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
+      attempt: number
+      max: number
+    }
   | { type: 'stream_reset' }
   | { type: 'error'; kind: string; message: string }
   | {
@@ -416,8 +424,8 @@ interface ChatContextValue {
    * 期间用户可能已切走，故由调用方钉住回滚时的会话 id，免得撤到别的会话头上。
    */
   rewindUndo: (sessionId?: string) => Promise<RewindUndoResult>
-  /** 当前对话的绑定（覆盖层优先于已落库真值）：驱动头像 / 工作区 chip / 模型选择器。 */
-  currentBinding: { personaId?: string; focusRoot: string | null; model?: string }
+  /** 当前对话的绑定（覆盖层优先于已落库真值）：驱动头像 / 工作区 chip / 模型与思考等级选择器。 */
+  currentBinding: { personaId?: string; focusRoot: string | null; model?: string; effort?: EffortLevel }
   /**
    * 「草稿会话」：当前会话尚未落库（不在 sessions 里）但已绑定身份（有 personaId）时合成的一条会话元信息，
    * 供左侧列表即时呈现这条「空对话」——与角色开启新对话时立刻出现在聊天列表，内容可为空。
@@ -431,6 +439,8 @@ interface ChatContextValue {
    * 覆盖层即时置位（驱动选择器显示），随下一次 send 落库到会话属性。见 bindings.model / SessionMeta.model。
    */
   setSessionModel: (modelRef: string) => void
+  /** 设置**当前对话**的思考等级（只改当前对话，立即落库；不动全局「最近使用」，那由调用方另记）。 */
+  setSessionEffort: (level: EffortLevel) => void
   /** 回应 ask_user 询问（每题的选中项标签或自由输入），并把该问答卡就地收敛为已答态。 */
   respondAsk: (key: string, answers: string[]) => void
   /**
@@ -479,7 +489,7 @@ const ChatContext = createContext<ChatContextValue | null>(null)
 export interface RecoveryStatus {
   attempt: number
   max: number
-  reason?: 'reconnect' | 'truncated' | 'empty' | 'context' | 'output_limit'
+  reason?: 'reconnect' | 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
 }
 
 const IDLE_STATUS: StreamStatus = { elapsedSec: 0, reconnecting: null }
@@ -924,7 +934,7 @@ function hasAttention(messages: ChatMessage[]): boolean {
 export function ChatProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const { t } = useI18n()
   const toast = useToast()
-  const { activeModel, providers } = useModels()
+  const { activeModel, providers, activeEffort, ready: modelsReady } = useModels()
   const { activeProject } = useWorkspace()
   // 流事件订阅只挂载一次，经 ref 读当前语言的 t（切语言不必重订阅）。
   const tRef = useRef(t)
@@ -942,7 +952,16 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
   // chat:send 一并绑定；已落库会话的 mount/unmount 也先写此层，随下次 chat:send 更新到主进程。
   // 与 SessionMeta（已落库真值）叠加读出 currentBinding，覆盖层优先（承载尚未落库/刚变更的值）。
   const [bindings, setBindings] = useState<
-    Map<string, { personaId?: string; focusRoot?: string | null; model?: string; createdAt?: number }>
+    Map<
+      string,
+      {
+        personaId?: string
+        focusRoot?: string | null
+        model?: string
+        effort?: EffortLevel
+        createdAt?: number
+      }
+    >
   >(() => new Map())
   // 未读会话（键=sessionId）：不在查看时有回合完成即记入，切进该会话即清除。
   const [unread, setUnread] = useState<ReadonlySet<string>>(() => new Set())
@@ -969,7 +988,13 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
   const setBinding = useCallback(
     (
       sid: string,
-      patch: { personaId?: string; focusRoot?: string | null; model?: string; createdAt?: number }
+      patch: {
+        personaId?: string
+        focusRoot?: string | null
+        model?: string
+        effort?: EffortLevel
+        createdAt?: number
+      }
     ): void => {
       const cur = bindingsRef.current.get(sid) ?? {}
       const map = new Map(bindingsRef.current)
@@ -1385,7 +1410,12 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
 
   // 当前对话的绑定读出（覆盖层优先于已落库 SessionMeta）：驱动对话优先外壳的头像 / 工作区 chip。
   // 覆盖层承载「尚未落库」（新会话首发前）或「刚 mount/unmount」的值；落库真值来自 listSessions。
-  const currentBinding = useMemo<{ personaId?: string; focusRoot: string | null; model?: string }>(
+  const currentBinding = useMemo<{
+    personaId?: string
+    focusRoot: string | null
+    model?: string
+    effort?: EffortLevel
+  }>(
     () => {
       const meta = sessions.find((s) => s.id === currentSessionId)
       const ov = bindings.get(currentSessionId)
@@ -1394,7 +1424,8 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
         ov && ov.focusRoot !== undefined ? ov.focusRoot : (meta?.focusRoot ?? null)
       // model：覆盖层优先（尚未落库的快照/刚切换）；否则落库真值。均缺省 = undefined（跟随全局默认）。
       const model = ov && ov.model !== undefined ? ov.model : meta?.model
-      return { personaId, focusRoot: focusRoot ?? null, model }
+      const effort = ov?.effort ?? meta?.effort
+      return { personaId, focusRoot: focusRoot ?? null, model, effort }
     },
     [currentSessionId, sessions, bindings]
   )
@@ -1418,6 +1449,21 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId, currentBinding.model, activeModel])
 
+  // 思考等级同理：当前对话尚无自己的等级 → 把此刻显示的「最近使用」定格为本对话等级并落库，免得在别的
+  // 对话里一切换、这里也跟着变。须等模型配置载入（ready）：此前 activeEffort 还是初值 'default'，会误定格。
+  useEffect(() => {
+    const sid = currentSessionId
+    if (!sid || currentBinding.effort || !modelsReady) return
+    setBinding(sid, { effort: activeEffort })
+    if (sessions.some((s) => s.id === sid))
+      void (async () => {
+        await window.deva.chat.setEffort({ sessionId: sid, effort: activeEffort })
+        await refreshSessions()
+      })()
+    // 已定格的对话首行即返回，activeEffort 之后再变也不会改写它。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId, currentBinding.effort, modelsReady])
+
   // 草稿会话：当前会话尚未落库（不在 sessions 里）但已绑定身份（有 personaId）→ 合成一条会话元信息，
   // 让左侧聊天列表在首发前就显示这条「空对话」。首发后主进程惰性建档、refreshSessions 把同 id 的真值并入
   // sessions，本值随之转 null，列表项按 id 无缝接管（草稿标题「未命名」→ 真实标题）。
@@ -1435,7 +1481,8 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       updatedAt: ts,
       personaId: ov.personaId,
       focusRoot: ov.focusRoot ?? null,
-      model: ov.model
+      model: ov.model,
+      effort: ov.effort
     }
   }, [currentSessionId, sessions, bindings])
 
@@ -1553,7 +1600,9 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
           // 本对话模型：恒记下这一轮实际使用的模型（上面解析出的生效模型）。发过消息的对话从此都有自己的
           // 模型，不再隐式跟随全局「最近使用」——否则在别的对话里切换模型会连带改掉它。未发过消息的空对话
           // 仍跟随最近使用（即新对话默认）。所选模型已被删除时这里记下的是回落后的实际模型。
-          modelRef: `${model.provider.id}:${model.model.id}`
+          modelRef: `${model.provider.id}:${model.model.id}`,
+          // 本对话思考等级：同 modelRef 恒记下这一轮实际使用的等级（尚未定格则取「最近使用」）。
+          effort: binding?.effort ?? meta?.effort ?? activeEffort
         })
         patchRuntime(sid, (r) => ({ ...r, turnId }))
         // 主进程发送时已惰性建档并落盘：立即刷新左侧，让新会话即时出现并高亮
@@ -1603,6 +1652,16 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       setBinding(sid, { model: modelRef })
       void (async () => {
         await window.deva.chat.setModel({ sessionId: sid, modelRef })
+        await refreshSessions()
+      })()
+    }
+
+    // 设置当前对话思考等级：同 setSessionModel——覆盖层即时置位，立即落库（惰性未建档的会话随首发落库）。
+    const setSessionEffort = (level: EffortLevel): void => {
+      const sid = sessionIdRef.current
+      setBinding(sid, { effort: level })
+      void (async () => {
+        await window.deva.chat.setEffort({ sessionId: sid, effort: level })
         await refreshSessions()
       })()
     }
@@ -1847,6 +1906,7 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       draftSession,
       mountFocus,
       setSessionModel,
+      setSessionEffort,
       respondAsk,
       respondPlan,
       respondMount,
@@ -1868,6 +1928,7 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
     currentBinding,
     draftSession,
     activeModel,
+    activeEffort,
     providers,
     t,
     toast,

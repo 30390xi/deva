@@ -26,6 +26,7 @@ import {
   GitMerge,
   Image as ImageIcon,
   Info,
+  Lightbulb,
   ListChecks,
   Lock,
   MessageCircle,
@@ -53,6 +54,7 @@ import { BotsPane } from './BotsPane'
 import './redesign.css'
 import type { McpKV, McpServer, McpStatus, Persona } from '../mock/extensions'
 import type {
+  EffortLevel,
   GitBranch as GitBranchEntry,
   GitFailReason,
   GitGenLocale,
@@ -82,7 +84,13 @@ import {
   type SessionMeta
 } from '../store/chat'
 import { useExtensions } from '../store/extensions'
-import { hasUsableModel, useModels } from '../store/models'
+import { findActive, hasUsableModel, useModels } from '../store/models'
+import {
+  clampEffort,
+  isToggleEffort,
+  supportedEffortLevels,
+  type EffortAdapter
+} from '../../../shared/effort'
 import { useTasks } from '../store/tasks'
 import { useI18n } from '../i18n/i18n'
 import { useDialog } from '../components/DialogProvider'
@@ -3873,6 +3881,7 @@ function Composer({
               </button>
             )}
             <ModelPicker />
+            <EffortPicker />
             {/* 流式输出时发送键变「停止」（点击中断本会话当前回合）：只放图标，按钮宽度不变、两态不跳动。 */}
             {streaming ? (
               <button
@@ -3985,6 +3994,86 @@ function ModelPicker(): React.JSX.Element {
                 })}
               </div>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 思考等级选择器（紧挨模型选择器，复用其 model-pick / chip 类）。与模型同一套语义：切换只改本对话并立即
+ * 落库（setSessionEffort），同时记为「最近使用」（setActiveEffort），尚未定格的对话（新对话）沿用它。
+ * 只列本对话生效模型支持的档（模型能力内置表，见 shared/effort.ts）；模型不支持思考等级则整个隐藏。
+ * 「默认」= 不发任何思考参数；各档如何映射到各家协议、不支持时如何自愈，见主进程 providers/* 与 chat.ts。
+ */
+function EffortPicker(): React.JSX.Element | null {
+  const { t } = useI18n()
+  const { activeEffort, setActiveEffort, activeModel, providers } = useModels()
+  const { currentBinding, setSessionEffort } = useChat()
+  const [open, setOpen] = useState(false)
+  // 本对话生效模型（同 ModelPicker：本对话已选 → 否则回落最近使用）。选择器只列对话模型，adapter 必属三协议之一。
+  const active = findActive(providers, currentBinding.model ?? null) ?? activeModel
+  const adapter = active?.provider.adapter as EffortAdapter | undefined
+  const modelId = active?.model.id
+  const levels = adapter && modelId ? supportedEffortLevels(adapter, modelId) : []
+  if (!adapter || !modelId || levels.length === 0) return null
+  // 只能开、不能调档的模型（如通义 qwen-plus、Kimi K2）：唯一的一档显示为「开启」。
+  const toggle = isToggleEffort(adapter, modelId)
+  const nameOf = (lv: EffortLevel): string =>
+    toggle && lv !== 'default' ? t('chat.effort.on') : t(`chat.effort.levels.${lv}`)
+  const hintOf = (lv: EffortLevel): string =>
+    toggle && lv !== 'default' ? t('chat.effort.onHint') : t(`chat.effort.hints.${lv}`)
+  // 本对话存的档位（尚未定格时为「最近使用」）收敛到该模型支持的档来显示——与主进程实际发送的一致；
+  // 存值本身不改，换回支持该档的模型即恢复。
+  const current = clampEffort(adapter, modelId, currentBinding.effort ?? activeEffort)
+  const label = nameOf(current)
+  const options: EffortLevel[] = ['default', ...levels]
+  return (
+    <div className="model-pick">
+      <button
+        className={`chip${open ? ' is-open' : ''}`}
+        type="button"
+        title={`${t('chat.effort.title')}：${label}`}
+        aria-label={`${t('chat.effort.title')}：${label}`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Lightbulb size={13} />
+        <span className="chip__label">{label}</span>
+        <ChevronDown size={13} className="chip__caret" />
+      </button>
+      {open && (
+        <>
+          <div className="model-pick__backdrop" onClick={() => setOpen(false)} />
+          <div className="model-pick__menu" role="menu">
+            <div className="model-pick__group">
+              <div className="model-pick__group-head">
+                <span className="model-pick__group-name">{t('chat.effort.title')}</span>
+              </div>
+              {options.map((lv) => {
+                const active = lv === current
+                return (
+                  <button
+                    key={lv}
+                    role="menuitemradio"
+                    aria-checked={active}
+                    className={`model-pick__item${active ? ' is-active' : ''}`}
+                    onClick={() => {
+                      // ① 记入本对话属性；② 记为「最近使用」，充当后续新对话的默认。
+                      setSessionEffort(lv)
+                      setActiveEffort(lv)
+                      setOpen(false)
+                    }}
+                  >
+                    <span className="model-pick__name cf-effort__text">
+                      <span>{nameOf(lv)}</span>
+                      <span className="cf-effort__hint">{hintOf(lv)}</span>
+                    </span>
+                    {active && <Check size={14} className="model-pick__check" />}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </>
       )}

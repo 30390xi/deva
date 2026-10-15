@@ -128,6 +128,8 @@ export async function* streamResponses(
     // 输出上限：未指定时给 8192（与 anthropic 一致，降低长回复被截断概率）。
     max_output_tokens: req.maxTokens ?? 8192,
     temperature: req.temperature,
+    // 思考等级（值已按模型能力表映射）。不请求 summary：未认证的组织请求推理摘要会被 400。
+    reasoning: req.effort ? { effort: req.effort.effort } : undefined,
     // 无状态使用：不留存于服务端（隐私一致），亦不使用 previous_response_id。
     store: false,
     stream: true
@@ -156,7 +158,10 @@ export async function* streamResponses(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    yield { type: 'error', error: httpError(res.status, text, res.headers.get('retry-after')) }
+    yield {
+      type: 'error',
+      error: httpError(res.status, text, res.headers.get('retry-after'), Boolean(req.effort))
+    }
     yield { type: 'done', stopReason: 'error' }
     return
   }

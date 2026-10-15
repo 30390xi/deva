@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { seedProviders, type Provider, type ModelDef, type ProviderPurpose } from '../mock/models'
+import type { EffortLevel } from '../../../preload'
 
 /**
  * 模型配置（全局，与项目无关）。
@@ -19,6 +20,10 @@ interface ModelsContextValue {
   activeModel: { provider: Provider; model: ModelDef } | null
   /** 记录一次模型选择为「最近使用」（由对话输入框的模型选择器调用）。 */
   setActiveModel: (providerId: string, modelId: string) => void
+  /** 最近使用的思考等级（同 activeModelId：充当尚未定格思考等级的对话的默认）。 */
+  activeEffort: EffortLevel
+  /** 记录一次思考等级选择为「最近使用」（由对话输入框的思考等级选择器调用）。 */
+  setActiveEffort: (level: EffortLevel) => void
   updateProvider: (
     id: string,
     patch: Partial<Pick<Provider, 'name' | 'apiHost' | 'enabled' | 'adapter' | 'threshold'>>
@@ -81,6 +86,7 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
   // 不内置默认模型，也不设显式「默认」入口：新用户首次在对话输入框选择模型后即记为「最近使用」，
   // 之后新对话默认沿用它（在此之前对话顶部显示「选择模型」）。
   const [activeModelId, setActiveModelId] = useState<string | null>(null)
+  const [activeEffort, setActiveEffort] = useState<EffortLevel>('default')
 
   // providerId -> 是否已配置密钥；以及加密是否可用
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({})
@@ -116,7 +122,7 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
       try {
         const cfg = await window.deva.config.get()
         const saved = cfg?.models as
-          | { providers?: Provider[]; activeModelId?: string | null }
+          | { providers?: Provider[]; activeModelId?: string | null; activeEffort?: EffortLevel }
           | undefined
         if (!alive) return
         const savedProviders = saved?.providers
@@ -135,6 +141,7 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
           )
         }
         if (saved && 'activeModelId' in saved) setActiveModelId(saved.activeModelId ?? null)
+        if (saved?.activeEffort) setActiveEffort(saved.activeEffort)
       } catch {
         /* 无配置 / 读取失败：沿用默认种子 */
       } finally {
@@ -149,8 +156,9 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
   // 变更后回写（仅在 hydrate 之后）。密钥不在此列——始终只在主进程加密存储。
   useEffect(() => {
     if (!hydrated) return
-    void window.deva.config.set({ models: { providers, activeModelId } })
-  }, [hydrated, providers, activeModelId])
+    // models 段整块替换（config:set 只做顶层浅合并），新增的兄弟字段必须一并写，漏写即被清掉。
+    void window.deva.config.set({ models: { providers, activeModelId, activeEffort } })
+  }, [hydrated, providers, activeModelId, activeEffort])
 
   const patchProvider = (id: string, fn: (p: Provider) => Provider): void =>
     setProviders((list) => list.map((p) => (p.id === id ? fn(p) : p)))
@@ -164,6 +172,8 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
       activeModelId,
       activeModel: findActive(providers, activeModelId),
       setActiveModel: (pid, mid) => setActiveModelId(`${pid}:${mid}`),
+      activeEffort,
+      setActiveEffort,
       updateProvider: (id, patch) => {
         patchProvider(id, (p) => ({ ...p, ...patch }))
         // 禁用服务商时，若默认模型属于它则清空，避免对话页指向不可用模型
@@ -263,7 +273,7 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
       secretsAvailable,
       ready: hydrated
     }),
-    [providers, selectedProviderId, activeModelId, keyStatus, secretsAvailable, hydrated]
+    [providers, selectedProviderId, activeModelId, activeEffort, keyStatus, secretsAvailable, hydrated]
   )
 
   return <ModelsContext.Provider value={value}>{children}</ModelsContext.Provider>

@@ -200,6 +200,27 @@ const zhCN: MessageTree = {
     model: '模型',
     agentMode: '智能体',
     selectModel: '选择模型',
+    effort: {
+      title: '思考等级',
+      levels: {
+        default: '默认',
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '极高',
+        max: '最高'
+      },
+      hints: {
+        default: '不额外设置，交给模型自己决定',
+        low: '想得少、回得快，适合简单问答',
+        medium: '速度与质量兼顾',
+        high: '多想一步，适合编码与多步任务',
+        xhigh: '更深入，适合复杂的编码与长任务',
+        max: '不计成本地深想，最慢最贵'
+      },
+      on: '开启',
+      onHint: '开启思考（该模型只能开，不能调深浅）'
+    },
     empty: '有什么可以帮你？',
     emptyHint: '描述任务，Deva 会读写项目文件、按需请求授权来完成。',
     error: '出错了',
@@ -281,7 +302,8 @@ const zhCN: MessageTree = {
       autoTruncated: '输出超长被截断，正在自动续写',
       autoEmpty: '上一步没有输出，正在自动重试',
       autoContext: '上下文超限，正在压缩后重试',
-      autoOutputLimit: '输出上限不被模型接受，已降档重试'
+      autoOutputLimit: '输出上限不被模型接受，已降档重试',
+      autoEffort: '当前模型不支持所选思考等级，已按默认重发'
     },
     ask: {
       title: '请你决定',
@@ -1110,6 +1132,27 @@ const en: MessageTree = {
     model: 'Model',
     agentMode: 'Agent',
     selectModel: 'Select model',
+    effort: {
+      title: 'Thinking level',
+      levels: {
+        default: 'Default',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+        max: 'Max'
+      },
+      hints: {
+        default: 'No extra setting; let the model decide',
+        low: 'Thinks less, answers faster; good for simple Q&A',
+        medium: 'Balances speed and quality',
+        high: 'Thinks further; good for coding and multi-step tasks',
+        xhigh: 'Goes deeper; for complex coding and long tasks',
+        max: 'Thinks as hard as it can; slowest and most expensive'
+      },
+      on: 'On',
+      onHint: 'Turn thinking on (this model cannot adjust its depth)'
+    },
     empty: 'How can I help?',
     emptyHint: 'Describe a task; Deva reads and writes project files, asking permission as needed.',
     error: 'Something went wrong',
@@ -1190,7 +1233,8 @@ const en: MessageTree = {
       autoTruncated: 'Output hit the length limit, continuing automatically',
       autoEmpty: 'Previous step produced nothing, retrying automatically',
       autoContext: 'Context too long, compacting and retrying',
-      autoOutputLimit: 'Output budget rejected by the model, retrying with a smaller one'
+      autoOutputLimit: 'Output budget rejected by the model, retrying with a smaller one',
+      autoEffort: 'This model does not support the selected thinking level; resent with the default'
     },
     ask: {
       title: 'Your call',
