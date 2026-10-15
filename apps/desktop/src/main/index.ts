@@ -53,7 +53,8 @@ function createWindow(): void {
             height: 40
           }
         : undefined,
-    trafficLightPosition: { x: 12, y: 13 },
+    // macOS 红绿灯整组约 54px 宽：在 72px 宽的图标栏内水平居中，垂直居中于栏顶预留的 40px（见 redesign.css .has-traffic-lights）
+    trafficLightPosition: { x: 9, y: 13 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // 安全基线：见 docs/architecture/security.md
@@ -91,6 +92,9 @@ function createWindow(): void {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
+  // macOS 全屏时系统隐藏红绿灯：通知渲染层收起图标栏为它预留的位置
+  win.on('enter-full-screen', () => win.webContents.send('window:fullscreen', true))
+  win.on('leave-full-screen', () => win.webContents.send('window:fullscreen', false))
 
   // 关窗驻留托盘：调度器在窗口隐藏时照常触发（关窗 ≠ 退出）。
   // win32 默认开启（config.closeToTray 显式为 false 时才真退出）；其它平台默认真退出（仅显式 true 才驻留）。
@@ -236,6 +240,7 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
+  ipcMain.handle('window:is-fullscreen', () => mainWindow?.isFullScreen() ?? false)
   ipcMain.handle('app:get-platform', () => process.platform)
 
   // 应用配置（~/.deva/config.json：主题/语言/模型等非敏感项，可 DEVA_HOME 覆盖）

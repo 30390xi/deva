@@ -762,6 +762,13 @@ const api = {
     minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: (): Promise<void> => ipcRenderer.invoke('window:toggle-maximize'),
     close: (): Promise<void> => ipcRenderer.invoke('window:close'),
+    /** 窗口是否全屏（macOS 全屏时红绿灯隐藏，图标栏不再为它让位） */
+    isFullScreen: (): Promise<boolean> => ipcRenderer.invoke('window:is-fullscreen'),
+    onFullScreen: (cb: (on: boolean) => void): (() => void) => {
+      const listener = (_e: unknown, on: boolean): void => cb(on)
+      ipcRenderer.on('window:fullscreen', listener)
+      return () => ipcRenderer.removeListener('window:fullscreen', listener)
+    },
     /** 主题切换时同步原生标题栏控件（min/max/close）的图标配色 */
     setOverlaySymbolColor: (color: string): Promise<void> =>
       ipcRenderer.invoke('window:set-overlay', color)

@@ -16,8 +16,9 @@ export interface Layout {
 export const SIDEBAR_DEFAULT = 300
 export const SIDEBAR_MIN = 220
 export const SIDEBAR_MAX = 480
-/** 图标栏宽（与 .cf-body 首列一致）。 */
-const ICONRAIL_W = 56
+/** 图标栏宽（经 --cf-rail-w 驱动 .cf-body 首列）；macOS 红绿灯可见时加宽到能放下整组按钮。 */
+export const ICONRAIL_W = 56
+export const ICONRAIL_W_MAC = 72
 /** 右侧主区至少留出的宽度：窗口窄时面板上限随之收缩，不把对话区挤没。 */
 const MAIN_MIN = 480
 
@@ -30,8 +31,8 @@ const COMPOSER_MAX_RATIO = 0.45
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi)
 
 /** 按当前窗口宽夹取面板宽：下限优先（极窄窗口宁可主区更窄，也不让面板小于下限）。 */
-export function clampSidebar(w: number, viewportW: number): number {
-  const hi = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, viewportW - ICONRAIL_W - MAIN_MIN))
+export function clampSidebar(w: number, viewportW: number, railW = ICONRAIL_W): number {
+  const hi = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, viewportW - railW - MAIN_MIN))
   return clamp(Math.round(w), SIDEBAR_MIN, hi)
 }
 

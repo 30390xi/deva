@@ -101,6 +101,8 @@ import { useToast, type ToastOptions } from '../components/ToastProvider'
 import { Modal } from '../components/Modal'
 import {
   COMPOSER_DEFAULT,
+  ICONRAIL_W,
+  ICONRAIL_W_MAC,
   ResizeHandle,
   SIDEBAR_DEFAULT,
   clampComposer,
@@ -176,6 +178,27 @@ function clipName(s: string, max = 20): string {
  */
 function DragBar(): React.JSX.Element {
   return <div className="cf-dragbar" aria-hidden="true" />
+}
+
+const IS_MAC = window.deva.platform === 'darwin'
+
+/**
+ * macOS 左上角红绿灯（关闭/最小化/全屏）当前是否可见：可见时图标栏加宽并在顶部为它让位。
+ * 全屏时系统会隐藏红绿灯，此时回到常规布局；其他平台恒为 false。
+ */
+function useTrafficLights(): boolean {
+  const [fullScreen, setFullScreen] = useState(false)
+  useEffect(() => {
+    if (!IS_MAC) return
+    let alive = true
+    const off = window.deva.window.onFullScreen(setFullScreen)
+    void window.deva.window.isFullScreen().then((on) => alive && setFullScreen(on))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+  return IS_MAC && !fullScreen
 }
 
 /**
@@ -303,8 +326,10 @@ export function ChatFirstShell(): React.JSX.Element {
   )
   // 左侧对话面板宽（可拖动）：存的是用户意图值，渲染时按窗口宽再夹取——窗口缩小时自动收窄、放大后复原。
   const viewport = useViewport()
+  const trafficLights = useTrafficLights()
+  const railW = trafficLights ? ICONRAIL_W_MAC : ICONRAIL_W
   const [sidebarW, setSidebarW] = useState(() => loadLayout().sidebarWidth ?? SIDEBAR_DEFAULT)
-  const sidebarShown = clampSidebar(sidebarW, viewport.w)
+  const sidebarShown = clampSidebar(sidebarW, viewport.w, railW)
   const sidebarRef = useRef(sidebarShown)
   sidebarRef.current = sidebarShown
   /**
@@ -486,20 +511,24 @@ export function ChatFirstShell(): React.JSX.Element {
   }
 
   return (
-    <div className="cf-shell">
+    <div
+      className={`cf-shell${IS_MAC ? ' is-mac' : ''}${trafficLights ? ' has-traffic-lights' : ''}`}
+    >
       {/* 无独立标题栏（微信式）：最小化/最大化/关闭用系统原生窗口控件叠加（titleBarOverlay），
           此处不再自绘按钮，避免与原生按钮重影。拖拽交给图标栏与对话头。 */}
       <div
         className="cf-body"
-        style={{ '--cf-side': `${sidebarShown}px` } as React.CSSProperties}
+        style={
+          { '--cf-rail-w': `${railW}px`, '--cf-side': `${sidebarShown}px` } as React.CSSProperties
+        }
       >
         {/* 面板右缘拖拽手柄（覆盖在分隔线上，绝对定位不占网格单元）；定时任务 tab 的列表列同宽同享。 */}
         <ResizeHandle
           axis="x"
           value={sidebarShown}
           title={t('cf.resizeSidebar')}
-          style={{ left: `calc(56px + ${sidebarShown}px)` }}
-          onChange={(v) => setSidebarW(clampSidebar(v, window.innerWidth))}
+          style={{ left: `calc(${railW}px + ${sidebarShown}px)` }}
+          onChange={(v) => setSidebarW(clampSidebar(v, window.innerWidth, railW))}
           onCommit={() => saveLayout({ sidebarWidth: sidebarRef.current })}
           onReset={() => {
             setSidebarW(SIDEBAR_DEFAULT)

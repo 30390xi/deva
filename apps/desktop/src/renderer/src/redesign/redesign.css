@@ -27,8 +27,9 @@
 .cf-body {
   position: relative; /* 侧栏拖拽手柄的定位锚 */
   display: grid;
-  /* 第二列（对话面板）宽由 --cf-side 驱动：可拖动，JS 侧已按上下限与窗口宽夹取。 */
-  grid-template-columns: 56px var(--cf-side, 300px) minmax(0, 1fr);
+  /* 首列图标栏宽由 --cf-rail-w 驱动（macOS 红绿灯可见时加宽，见 resizable.tsx ICONRAIL_W_MAC）；
+     第二列（对话面板）宽由 --cf-side 驱动：可拖动，JS 侧已按上下限与窗口宽夹取。 */
+  grid-template-columns: var(--cf-rail-w, 56px) var(--cf-side, 300px) minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -112,6 +113,11 @@ body.cf-resizing-y * {
   background: var(--bg-inset);
   border-right: 1px solid var(--border);
   -webkit-app-region: drag;
+}
+/* macOS 红绿灯在左上角：栏顶空出 40px 给它（仍是拖拽区），头像与导航从下方开始排。
+   全屏时红绿灯隐藏，不挂 .has-traffic-lights，回到常规间距。 */
+.has-traffic-lights .cf-iconrail {
+  padding-top: calc(40px + var(--space-1));
 }
 /* 图标按钮本身不参与拖拽，保证可点击 */
 .cf-navbtn {
@@ -682,6 +688,10 @@ body.cf-resizing-y * {
   padding: var(--space-2) 140px var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+}
+/* macOS 窗口控件在左上角，右侧无需让位 */
+.is-mac .cf-conv__head {
+  padding-right: var(--space-4);
 }
 .cf-conv__head .cf-idbtn {
   -webkit-app-region: no-drag;
