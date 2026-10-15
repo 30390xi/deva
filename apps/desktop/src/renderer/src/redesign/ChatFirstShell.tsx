@@ -4596,7 +4596,7 @@ function GeneralPane(): React.JSX.Element {
 function ExtensionsPane(): React.JSX.Element {
   const { t } = useI18n()
   // 角色（persona）不在此列出：它有专属的「角色」tab 与资料卡来管理，扩展页只管技能 / MCP。
-  // 子智能体亦不在此列：它是内置能力（通用 / Explore / Plan），不可配置，见 main/services/subagents.ts。
+  // 子智能体亦不在此列：它是内置能力（通用 / Explore / Research / Plan），不可配置，见 main/services/subagents.ts。
   const { skills, mcp, toggle, refresh } = useExtensions()
   // 进入扩展页即从磁盘重拉最新：技能可能经对话 create_skill、上传或直接改盘在别处新增，Provider 仅在
   // 应用启动时载入一次，故此处显式刷新，避免必须重启才能看到新技能。refresh 标识稳定，不会形成刷新循环。

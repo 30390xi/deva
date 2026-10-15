@@ -1042,7 +1042,7 @@ export function ToolGroupCard({ tools }: { tools: ToolBlock[] }): React.JSX.Elem
   )
 }
 
-/** 子智能体类型的展示名：分身（fork）按界面语言显示，其余（General / Explore / Plan）原样。 */
+/** 子智能体类型的展示名：分身（fork）按界面语言显示，其余（General / Explore / Research / Plan）原样。 */
 function subagentName(agent: string | undefined, t: (key: string) => string): string {
   if (!agent) return ''
   return agent.toLowerCase() === 'fork' ? t('chat.subagent.fork') : agent

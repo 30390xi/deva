@@ -29,7 +29,7 @@ import { useDialog } from '../components/DialogProvider'
  * `deva.personas.list()` 读取 ~/.deva，增删改启停都落盘；MCP 还订阅 `deva.mcp.onStatus`
  * 实时打运行期状态补丁（连接/断开/错误）。
  *
- * 子智能体**不在此列**：它是内置能力（通用 / Explore / Plan，见 main/services/subagents.ts），
+ * 子智能体**不在此列**：它是内置能力（通用 / Explore / Research / Plan，见 main/services/subagents.ts），
  * 由模型经 `run_subagent` 在主进程内递归派生，不落盘、不可配置、不进本页。
  */
 type AnyExt = Skill | McpServer | Persona

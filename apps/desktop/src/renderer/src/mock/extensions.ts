@@ -3,7 +3,7 @@
  * 用户内容首启为空态（由用户上传/对话创建，或手放于 ~/.deva 下，source='custom'）；
  * 唯一的内置项是系统元技能 `create-skill`（source='builtin'，随二进制内置、不落盘/不可删）。
  * 技能与 MCP 已接入真实存储（~/.deva/skills、~/.deva/mcp.json，经 deva.skills / deva.mcp IPC）。
- * 子智能体（通用 / Explore / Plan）是**内置能力**，不可配置、不在此列——见 main/services/subagents.ts。
+ * 子智能体（通用 / Explore / Research / Plan）是**内置能力**，不可配置、不在此列——见 main/services/subagents.ts。
  */
 
 export type ExtKind = 'persona' | 'skill' | 'mcp'

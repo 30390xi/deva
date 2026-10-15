@@ -1528,7 +1528,7 @@ function buildSubagentTool(): ToolSpec {
       '除 fork 外，子智能体看不到主对话，prompt 要写清背景、目标和期望的回报形式；派 Explore 时在 prompt 里说明检索力度（「中等」或「非常彻底」）。' +
       '子智能体的结论不会直接显示给用户，把要紧的部分转述给用户。' +
       '结论末尾附有子智能体 ID：用 send_to_subagent 给它发消息，它会在保留原有上下文的基础上继续；再次调用 run_subagent 则是全新开始。' +
-      '前台还是后台：需要它的结论才能往下做时用前台（默认），调用会等它跑完再返回；手头确有不依赖其结论、可以同时推进的工作时，设 run_in_background 让它在后台跑——调用立即返回，它结束后系统会自动通知你。后台运行期间不要轮询、等待或去查它的进度，接着做别的事或先回复用户。' +
+      '前台还是后台：需要它的结论才能往下做时用前台（默认），调用会等它跑完再返回；手头确有不依赖其结论、可以同时推进的工作时，设 run_in_background 让它在后台跑——调用立即返回，它结束后系统会自动通知你。后台运行期间不要轮询、等待或去查它的进度，接着做别的事或先回复用户。它的结论只会以系统通知的形式送达，送达之前绝不要猜测或编造它的结果；用户若在此期间问起，如实说它还在运行。' +
       `可用的子智能体：${list}。省略 agent 即通用子智能体 ${GENERAL_SUBAGENT.name}。`,
     inputSchema: {
       type: 'object',
@@ -1760,7 +1760,7 @@ function buildSubagentSystem(def: SubagentDef, workspaceRoot: string | null): st
     '你无法向用户提问（没有 ask_user 工具），也不能再派生其它子智能体；若信息不足，基于合理默认完成，并在结论中说明所做的假设。',
     '你的工具调用默认直接执行、无需授权，文件读写与命令执行均不设任何限制。调用失败时改用其它方式或在结论中说明，切勿原样反复重试。'
   ]
-  // 项目说明：子智能体同样在该项目里干活（Explore / Plan 调研、通用子智能体动手），须知项目约定。
+  // 项目说明：子智能体同样在该项目里干活（Explore / Research / Plan 调研、通用子智能体动手），须知项目约定。
   // 派生时按当时的工作区读取（轮中挂载后派生的也能拿到），在子轮内定格。
   const projectDoc = projectDocPromptSection(loadProjectDoc(workspaceRoot))
   if (projectDoc.length) lines.push(...projectDoc)

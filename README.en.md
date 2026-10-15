@@ -46,7 +46,7 @@ It can also handle repetitive chores on a schedule, and you can keep chatting fr
     </td>
     <td width="33%" valign="top">
       <h3>🤖 Subagents, multi-agent dispatch</h3>
-      Big tasks get split up and dispatched to multiple subagents running in parallel — or in the background when the result isn't needed right away. Three built-in types — General, Explore and Plan — each with its own context, returning only the conclusions.
+      Big tasks get split up and dispatched to multiple subagents running in parallel — or in the background when the result isn't needed right away. Four built-in types — General, Explore, Research and Plan — each with its own context, returning only the conclusions.
     </td>
   </tr>
   <tr>
@@ -150,10 +150,13 @@ When a task requires going through many files, or can be split into independent 
 | Subagent | What it does | Can it make changes? |
 | --- | --- | --- |
 | **General** | General-purpose; independently completes an assigned task | Yes, same tools as the main conversation |
-| **Explore** | Casts a wide net across the codebase: where, how many, how it's named — reported as `path:line` | Read-only, no file changes |
+| **Explore** | Casts a wide net across a codebase or folder (docs, notes, data): where, how many, how it's named — reported as `path:line` | Read-only, no file changes |
+| **Research** | Digs through official docs, changelogs and open-source code to answer how a third-party library or tool works, or what changed in which version — with source links | Read-only, no file changes |
 | **Plan** | Surveys the current state, then writes a step-by-step implementation plan, key files and trade-offs | Read-only, plans only |
 
+- 🪞 **With or without the backstory**: the types above all start from scratch and see only the task they're handed; when a job needs the backstory, it sends a "fork" instead — a copy of itself that carries the whole conversation so far, with the same tools and model, and still keeps its process out of the main chat
 - ⚡ **Truly parallel**: independent subtasks are dispatched in the same turn and run together
+- 💬 **Follow-ups**: a subagent that's finished can be picked up again — it remembers what it already looked at and did, so follow-up questions or extra work don't start from scratch
 - 🌙 **Background runs**: when a conclusion isn't needed right away, it sends the subagent to the background and moves on to other work or replies to you first; when the background run finishes it's notified automatically — a completion notice appears in the chat and it picks things up from there. The "Stop" button on the card stops an individual background subagent (the main chat's stop button doesn't)
 - ♾️ **No step limit**: subagents have no cap on tool-call steps, so wide searches and long tasks run through to the end
 - 🧹 **Keeps the main chat clean**: each subagent has its own context; files it read and commands it ran stay out of the main conversation — only conclusions come back

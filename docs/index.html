@@ -741,7 +741,6 @@
         <div class="os">
           <h3><svg class="i"><use href="#i-win"/></svg>Windows</h3>
           <div class="file"><code>Deva-x.y.z-setup.exe</code><span>双击安装</span></div>
-          <div class="file"><code>Deva-x.y.z.msi</code><span>支持组策略 / msiexec 静默安装</span></div>
         </div>
         <div class="os">
           <h3><svg class="i"><use href="#i-apple"/></svg>macOS</h3>
@@ -751,13 +750,13 @@
       </div>
       <div class="dl__cta">
         <a class="btn btn--primary" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-down"/></svg>前往 Releases 下载</a>
-        <span style="color:var(--fg-subtle);font-size:14px">exe 和 msi 选一个装就行，两个都装会变成两个独立的程序。</span>
+        <span style="color:var(--fg-subtle);font-size:14px">已经装了的，在「设置 → 关于」里检查更新即可。</span>
       </div>
       <details>
         <summary>第一次打开被系统拦住？</summary>
         <ul>
           <li><b>Windows</b>：弹出「Windows 已保护你的电脑」时，点「更多信息」→「仍要运行」。</li>
-          <li><b>macOS</b>：提示无法打开时，到「系统设置 → 隐私与安全性」里点「仍要打开」；如果提示「已损坏」，在终端执行：
+          <li><b>macOS</b>：提示无法验证开发者时，到「系统设置 → 隐私与安全性」里点「仍要打开」，每次升级后第一次打开都要放行一次；万一提示「已损坏」，在终端执行：
             <pre><code>xattr -cr /Applications/Deva.app</code></pre>
           </li>
         </ul>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC','Noto Sans SC',sans-serif">
-  <title>Deva 亮点演示：对话、多角色、子代理、代码回退、定时任务、手机回复</title>
+  <title>Deva 亮点演示：对话、多角色、子智能体、代码回退、定时任务、手机回复</title>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#6D28D9"/>
@@ -158,9 +158,9 @@
     </g>
   </g>
 
-  <!-- 场景 3：子代理 -->
+  <!-- 场景 3：子智能体 -->
   <g class="sc s3">
-    <text x="116" y="91" font-size="14" font-weight="700" fill="#111827">子代理 · 自动派发多 Agent 并行</text>
+    <text x="116" y="91" font-size="14" font-weight="700" fill="#111827">子智能体 · 自动派发多 Agent 并行</text>
     <g class="a">
       <rect x="674" y="120" width="226" height="34" rx="12" fill="#6D28D9"/>
       <text x="886" y="142" text-anchor="end" font-size="13" fill="#FFFFFF">梳理鉴权模块，顺便出个改造方案</text>
@@ -168,7 +168,7 @@
     <g class="b">
       <circle cx="128" cy="183" r="12" fill="#6D28D9"/>
       <text x="128" y="187" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">D</text>
-      <text x="152" y="188" font-size="13" fill="#111827">拆成 3 个子任务，自动派发子代理并行处理：</text>
+      <text x="152" y="188" font-size="13" fill="#111827">拆成 3 个子任务，自动派发子智能体并行处理：</text>
       <rect x="152" y="202" width="240" height="92" rx="10" fill="#FFFFFF" stroke="#DDD6FE"/>
       <rect x="166" y="216" width="64" height="20" rx="6" fill="#EDE9FE"/>
       <text x="198" y="230" text-anchor="middle" font-size="11" font-weight="700" fill="#6D28D9">Explore</text>
@@ -315,14 +315,14 @@
     <g fill="#FFFFFF" fill-opacity="0.8">
       <text x="120" y="480">All in Chat</text>
       <text x="264" y="480">多角色</text>
-      <text x="408" y="480">子代理</text>
+      <text x="408" y="480">子智能体</text>
       <text x="552" y="480">代码回退</text>
       <text x="696" y="480">定时任务</text>
       <text x="840" y="480">手机回复</text>
     </g>
     <g class="hl t1"><rect x="52" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="120" y="480" font-weight="700" fill="#6D28D9">All in Chat</text><rect class="pg" x="72" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
     <g class="hl t2"><rect x="196" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="264" y="480" font-weight="700" fill="#6D28D9">多角色</text><rect class="pg" x="216" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
-    <g class="hl t3"><rect x="340" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="408" y="480" font-weight="700" fill="#6D28D9">子代理</text><rect class="pg" x="360" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
+    <g class="hl t3"><rect x="340" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="408" y="480" font-weight="700" fill="#6D28D9">子智能体</text><rect class="pg" x="360" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
     <g class="hl t4"><rect x="484" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="552" y="480" font-weight="700" fill="#6D28D9">代码回退</text><rect class="pg" x="504" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
     <g class="hl t5"><rect x="628" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="696" y="480" font-weight="700" fill="#6D28D9">定时任务</text><rect class="pg" x="648" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
     <g class="hl t6"><rect x="772" y="458" width="136" height="34" rx="17" fill="#FFFFFF"/><text x="840" y="480" font-weight="700" fill="#6D28D9">手机回复</text><rect class="pg" x="792" y="486" width="96" height="2" rx="1" fill="#C4B5FD"/></g>
