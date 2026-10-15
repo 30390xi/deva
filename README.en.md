@@ -233,8 +233,7 @@ When a conversation is about to fill the model's context window, earlier content
 > [!WARNING]
 > **It doesn't ask before each action.** Reading/writing files and running commands are executed directly, with no permission prompts. Keep important projects under Git, or back them up first.
 
-- 💳 **Costs go to your own account.** Every conversation and every scheduled task consumes quota from the API key you provide.
-- 🔒 **Your data stays local.** Settings, conversations, memories, tasks, skills, bot configs and more live under `~/.deva`, mostly as plain files you can open directly; API keys and bot credentials are stored encrypted. To use a different location, set the `DEVA_HOME` environment variable. If you use IM bots, messages from your phone pass through the corresponding IM platform's servers.
+🔒 **Your data stays local.** Settings, conversations, memories, tasks, skills, bot configs and more live under `~/.deva`, mostly as plain files you can open directly; API keys and bot credentials are stored encrypted. To use a different location, set the `DEVA_HOME` environment variable. If you use IM bots, messages from your phone pass through the corresponding IM platform's servers.
 
 ---
 

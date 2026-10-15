@@ -36,27 +36,26 @@
     --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d0d13;
-      --bg-soft: #13121c;
-      --card: #17161f;
-      --fg: #ececf2;
-      --fg-muted: #a6a5b4;
-      --fg-subtle: #74737f;
-      --border: #26252f;
-      --border-strong: #34333f;
-      --accent: #8f80ff;
-      --accent-ink: #a597ff;
-      --accent-tint: rgba(143, 128, 255, 0.12);
-      --success: #51cf66;
-      --danger: #ff6b6b;
-      --warn: #fb923c;
-      --warn-tint: rgba(251, 146, 60, 0.1);
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -12px rgba(0, 0, 0, 0.5);
-      --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.3), 0 40px 80px -30px rgba(0, 0, 0, 0.7);
-      color-scheme: dark;
-    }
+  /* 深色：<html data-theme="dark">（页头脚本按记住的选择或系统偏好设上）；整页与演示界面都只用 token 取色，切换即一起跟着变 */
+  :root[data-theme="dark"] {
+    --bg: #0d0d13;
+    --bg-soft: #13121c;
+    --card: #17161f;
+    --fg: #ececf2;
+    --fg-muted: #a6a5b4;
+    --fg-subtle: #74737f;
+    --border: #26252f;
+    --border-strong: #34333f;
+    --accent: #8f80ff;
+    --accent-ink: #a597ff;
+    --accent-tint: rgba(143, 128, 255, 0.12);
+    --success: #51cf66;
+    --danger: #ff6b6b;
+    --warn: #fb923c;
+    --warn-tint: rgba(251, 146, 60, 0.1);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -12px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.3), 0 40px 80px -30px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
@@ -111,6 +110,9 @@
   .btn--sm { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 9px; }
   .icon-link { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--fg-muted); }
   .icon-link:hover { color: var(--fg); background: var(--bg-soft); }
+  .theme-btn { border: none; background: none; padding: 0; cursor: pointer; }
+  .theme-btn .sun, [data-theme="dark"] .theme-btn .moon { display: none; }
+  [data-theme="dark"] .theme-btn .sun { display: block; }
 
   /* ---------- 首屏 ---------- */
   .hero { position: relative; padding: 96px 0 40px; overflow-x: clip; text-align: center; }
@@ -138,9 +140,9 @@
   .hero__hint svg.i { width: 18px; height: 18px; animation: nudge 1.8s ease-in-out infinite; }
   @keyframes nudge { 50% { transform: translateY(5px); } }
 
-  /* ============ 滚动演示：主界面固定，滚轮一格推进一章——同一个对话里依次演示各个功能 ============ */
-  .stage { position: relative; height: calc(100vh - var(--nav-h) + 8 * 50vh); }
-  .stage__pin { position: sticky; top: var(--nav-h); height: calc(100vh - var(--nav-h)); padding: 16px 0 20px; }
+  /* ============ 演示：主界面占一屏，各章自动依次播放——同一个对话里依次演示各个功能 ============ */
+  .stage { scroll-margin-top: var(--nav-h); }
+  .stage__pin { height: calc(100vh - var(--nav-h)); min-height: 520px; max-height: 960px; padding: 16px 0 20px; }
   .stage__pin > .wrap { max-width: 1280px; height: 100%; display: flex; flex-direction: column; gap: 12px; }
   /* 说明条：在界面上方，随章节横向切入切出 */
   .stage__bar { flex: none; display: flex; align-items: center; gap: 24px; }
@@ -158,9 +160,10 @@
   .stage__meta { flex: none; display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--fg-subtle); }
   .stage__count { font-variant-numeric: tabular-nums; }
   .stage__count b { color: var(--fg); font-size: 17px; }
-  .mouse { position: relative; flex: none; width: 20px; height: 30px; border: 2px solid var(--border-strong); border-radius: 10px; }
-  .mouse i { position: absolute; left: 50%; top: 5px; width: 3px; height: 6px; margin-left: -1.5px; border-radius: 2px; background: var(--accent); animation: wheel 1.6s ease-in-out infinite; }
-  @keyframes wheel { 0% { opacity: 0; transform: translateY(-2px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(9px); } }
+  .stage__nav { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--fg-muted); cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease; }
+  .stage__nav:hover { color: var(--fg); border-color: var(--accent); }
+  .stage__nav svg.i { width: 15px; height: 15px; stroke-width: 2.2; }
+  .stage__nav--prev svg.i { transform: scaleX(-1); }
   .stage__progress { flex: none; height: 3px; border-radius: 3px; background: var(--border); overflow: hidden; }
   .stage__progress i { display: block; width: 0; height: 100%; background: var(--grad); transition: width 0.5s var(--ease); }
   .stage__view { flex: 1; min-height: 0; }
@@ -414,7 +417,7 @@
   .step p { margin: 0; color: var(--fg-muted); font-size: 15px; }
 
   /* ---------- 使用须知 ---------- */
-  .notice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .notice { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
   .tip { padding: 24px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); }
   .tip--warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); background: var(--warn-tint); }
   .tip h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 17px; }
@@ -427,9 +430,11 @@
   .os { padding: 26px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); }
   .os h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 19px; }
   .os h3 svg { width: 22px; height: 22px; }
-  .file { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
-  .file code { background: none; padding: 0; color: var(--fg); font-weight: 600; }
-  .file span { color: var(--fg-subtle); text-align: right; }
+  .file { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
+  .file code { min-width: 0; overflow-wrap: anywhere; background: none; padding: 0; color: var(--fg); font-weight: 600; transition: color 0.15s ease; }
+  .file > span { margin-left: auto; color: var(--fg-subtle); text-align: right; white-space: nowrap; }
+  .file svg.i { width: 16px; height: 16px; color: var(--fg-subtle); transition: color 0.15s ease; }
+  .file:hover code, .file:hover svg.i { color: var(--accent-ink); }
   .dl__cta { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   details { margin-top: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 4px 22px; }
   summary { cursor: pointer; padding: 14px 0; font-weight: 600; }
@@ -451,7 +456,7 @@
     .mock__list { display: none; }
   }
   @media (max-width: 960px) {
-    .grid, .notice { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 720px) {
     .wrap { padding: 0 16px; }
@@ -460,7 +465,6 @@
     .hero { padding: 56px 0 24px; }
     .hero__hint { margin-top: 36px; }
     .grid, .steps, .notice, .dl { grid-template-columns: 1fr; }
-    .stage { height: calc(100vh - var(--nav-h) + 8 * 55vh); }
     .stage__pin { padding: 10px 0 12px; }
     .stage__pin > .wrap { gap: 10px; }
     .stage__bar { gap: 12px; align-items: flex-start; }
@@ -468,7 +472,6 @@
     .cap__tag { padding: 3px 11px; font-size: 12px; }
     .cap h3 { font-size: 18px; }
     .cap p { font-size: 13.5px; }
-    .mouse { display: none; }
     .mock { font-size: 13px; border-radius: 14px; }
     .mock__bar { display: none; }
     .mock__body { grid-template-columns: 1fr; }
@@ -492,9 +495,18 @@
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .btn, .feat, .cap, .chat__list, .stage__progress i, .m-todo__bar i { transition: none; }
-    .hero__hint svg.i, .mouse i, .caret, .m-think i, .spin, .enter, .pressed, .badge--ok { animation: none; }
+    .hero__hint svg.i, .caret, .m-think i, .spin, .enter, .pressed, .badge--ok { animation: none; }
   }
 </style>
+<script>
+  // 尽早定下深浅色（记住的选择优先，否则跟随系统），免得首屏先闪一下浅色
+  ;(() => {
+    let t = null
+    try { t = localStorage.getItem('deva-site-theme') } catch {}
+    if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    document.documentElement.dataset.theme = t
+  })()
+</script>
 </head>
 <body>
 
@@ -523,12 +535,13 @@
   <symbol id="i-term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
   <symbol id="i-git" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
-  <symbol id="i-card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
   <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
@@ -549,8 +562,9 @@
       <a href="#download">下载</a>
     </nav>
     <div class="nav__right">
+      <button class="icon-link theme-btn" type="button" aria-label="切换深色模式" title="切换深色模式"><svg class="i moon"><use href="#i-moon"/></svg><svg class="i sun"><use href="#i-sun"/></svg></button>
       <a class="icon-link" href="https://github.com/sqfcyily/deva" aria-label="GitHub" title="GitHub"><svg class="i"><use href="#i-gh"/></svg></a>
-      <a class="btn btn--primary btn--sm" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-down"/></svg>下载</a>
+      <a class="btn btn--primary btn--sm" href="#download" data-dl-auto><svg class="i"><use href="#i-down"/></svg>下载</a>
     </div>
   </div>
 </header>
@@ -563,7 +577,7 @@
       <h1>对话优先的<br /><span class="grad-text">桌面 AI 助手</span></h1>
       <p class="hero__lead">平时当聊天工具用；给它一个文件夹，它就能直接动手——看代码、改文件、跑命令。还能帮你定时做些重复的事，人不在电脑前，也能用手机接着聊。</p>
       <div class="hero__cta">
-        <a class="btn btn--primary" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-down"/></svg>免费下载</a>
+        <a class="btn btn--primary" href="#download" data-dl-auto><svg class="i"><use href="#i-down"/></svg><span class="dl-label">免费下载</span></a>
         <a class="btn" href="https://github.com/sqfcyily/deva"><svg class="i"><use href="#i-gh"/></svg>查看源码</a>
       </div>
       <div class="hero__meta">
@@ -575,7 +589,7 @@
     </div>
   </section>
 
-  <!-- 滚动演示：同一个对话，滚轮一格推进一章 -->
+  <!-- 演示：同一个对话，各章自动依次播放 -->
   <section id="stage" class="stage" style="padding:0">
     <div class="stage__pin">
       <div class="wrap">
@@ -591,7 +605,11 @@
             <div class="cap"><span class="cap__tag">08 · 回退</span><div class="cap__txt"><h3>改坏了，退回去</h3><p>输入 <code>/rewind</code> 或连按两次 <kbd>Esc</kbd>，回到任意一轮之前；代码和对话可分开恢复，回退了还能撤销。</p></div></div>
             <div class="cap"><span class="cap__tag">09 · 手机上接着聊</span><div class="cap__txt"><h3>人不在电脑前，手机上接着聊</h3><p>接入飞书或 Telegram，扫码就配好；手机上发的消息，就是在这个对话里继续聊。</p></div></div>
           </div>
-          <div class="stage__meta"><span class="stage__count"><b>1</b> / 9</span><span class="mouse" title="滚动鼠标继续"><i></i></span></div>
+          <div class="stage__meta">
+            <button class="stage__nav stage__nav--prev" type="button" aria-label="上一章" title="上一章"><svg class="i"><use href="#i-chev"/></svg></button>
+            <span class="stage__count"><b>1</b> / 9</span>
+            <button class="stage__nav stage__nav--next" type="button" aria-label="下一章" title="下一章"><svg class="i"><use href="#i-chev"/></svg></button>
+          </div>
         </div>
         <div class="stage__progress"><i></i></div>
 
@@ -701,7 +719,7 @@
         <span class="prov prov--more">+ 自定义服务</span>
       </div>
       <div class="steps">
-        <div class="step"><h3>下载安装</h3><p>到 Releases 下载对应系统的安装包，双击安装。</p></div>
+        <div class="step"><h3>下载安装</h3><p>在下方「下载」里点对应系统的安装包，双击安装。</p></div>
         <div class="step"><h3>接入模型</h3><p>选一个服务商，填上你的 API 密钥，挑一个要用的模型。</p></div>
         <div class="step"><h3>开始对话</h3><p>选个角色开聊；想让它动手，就挂载一个文件夹。</p></div>
       </div>
@@ -720,10 +738,6 @@
           <p>读写文件、跑命令都直接执行，不弹授权框。重要的项目建议用 Git 管着，或者先备份。</p>
         </div>
         <div class="tip">
-          <h3><svg class="i"><use href="#i-card"/></svg>费用走你自己的账户</h3>
-          <p>每次对话、每个定时任务都会消耗你所填 API 密钥的额度。</p>
-        </div>
-        <div class="tip">
           <h3><svg class="i"><use href="#i-lock"/></svg>数据都在本机</h3>
           <p>设置、对话、记忆、任务都放在 <code>~/.deva</code>，API 密钥加密保存。用 IM 机器人时，手机上的对话会经过对应平台。</p>
         </div>
@@ -736,20 +750,20 @@
     <div class="wrap">
       <span class="eyebrow">DOWNLOAD</span>
       <h2>下载 Deva</h2>
-      <p class="sec-lead">免费、开源。到 GitHub Releases 下载最新版本的安装包。</p>
+      <p class="sec-lead">免费、开源。点安装包直接下载最新版本<span class="dl__ver"></span>。</p>
       <div class="dl">
         <div class="os">
           <h3><svg class="i"><use href="#i-win"/></svg>Windows</h3>
-          <div class="file"><code>Deva-x.y.z-setup.exe</code><span>双击安装</span></div>
+          <a class="file" data-asset="win" href="https://github.com/sqfcyily/deva/releases/latest"><code>Deva-x.y.z-setup.exe</code><span>双击安装<span class="file__size"></span></span><svg class="i"><use href="#i-down"/></svg></a>
         </div>
         <div class="os">
           <h3><svg class="i"><use href="#i-apple"/></svg>macOS</h3>
-          <div class="file"><code>Deva-x.y.z-arm64.dmg</code><span>M 系列芯片</span></div>
-          <div class="file"><code>Deva-x.y.z-x64.dmg</code><span>Intel 芯片</span></div>
+          <a class="file" data-asset="mac-arm64" href="https://github.com/sqfcyily/deva/releases/latest"><code>Deva-x.y.z-arm64.dmg</code><span>M 系列芯片<span class="file__size"></span></span><svg class="i"><use href="#i-down"/></svg></a>
+          <a class="file" data-asset="mac-x64" href="https://github.com/sqfcyily/deva/releases/latest"><code>Deva-x.y.z-x64.dmg</code><span>Intel 芯片<span class="file__size"></span></span><svg class="i"><use href="#i-down"/></svg></a>
         </div>
       </div>
       <div class="dl__cta">
-        <a class="btn btn--primary" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-down"/></svg>前往 Releases 下载</a>
+        <a class="btn" href="https://github.com/sqfcyily/deva/releases"><svg class="i"><use href="#i-gh"/></svg>全部版本与更新说明</a>
         <span style="color:var(--fg-subtle);font-size:14px">已经装了的，在「设置 → 关于」里检查更新即可。</span>
       </div>
       <details>
@@ -779,10 +793,91 @@
 </footer>
 
 <script>
-  // 滚动演示：同一个对话分 9 章，滚轮 / 方向键一次推进一章（一次手势只推一章）；首章往上、末章往下放行页面滚动。
+  // 深浅色：按钮在两者间切换并记住；没手动选过时跟随系统变化。整页与演示界面都只用 token 取色，切换即一起跟着变
+  ;(() => {
+    const root = document.documentElement
+    const btn = document.querySelector('.theme-btn')
+    const sys = matchMedia('(prefers-color-scheme: dark)')
+    const label = () => {
+      const t = root.dataset.theme === 'dark' ? '切换浅色模式' : '切换深色模式'
+      btn.title = t
+      btn.setAttribute('aria-label', t)
+    }
+    const apply = (t) => {
+      const set = () => { root.dataset.theme = t; label() }
+      // 支持视图过渡时整页淡入淡出，避免各处颜色一跳
+      if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(set)
+      else set()
+    }
+    btn.addEventListener('click', () => {
+      const t = root.dataset.theme === 'dark' ? 'light' : 'dark'
+      try { localStorage.setItem('deva-site-theme', t) } catch {}
+      apply(t)
+    })
+    sys.addEventListener('change', (e) => {
+      let saved = null
+      try { saved = localStorage.getItem('deva-site-theme') } catch {}
+      if (!saved) apply(e.matches ? 'dark' : 'light')
+    })
+    label()
+  })()
+
+  // 下载：向 GitHub API 取最新版本，把下载区各安装包、首屏 / 顶栏的下载按钮（按访客系统挑）直接指到对应文件。
+  // 安装包名带版本号，用不了固定的 releases/latest/download/<文件名>；取不到时保留静态链接（最新版本的 Releases 页 / 下载区）。
+  // 未登录的 API 每个 IP 每小时限 60 次，结果在本机缓存半小时
+  ;(() => {
+    const KEY = 'deva-site-release'
+    const PICK = { win: /-setup\.exe$/, 'mac-arm64': /-arm64\.dmg$/, 'mac-x64': /-x64\.dmg$/ }
+    const LABEL = { win: '下载 Windows 版', 'mac-arm64': '下载 macOS 版（M 系列）', 'mac-x64': '下载 macOS 版（Intel）' }
+    // 该给访客哪个包：Mac 只有 Chromium 系浏览器问得出芯片架构，问不出就不猜，让人到下载区自己挑
+    async function detect() {
+      const ua = navigator.userAgent
+      if (/Windows/.test(ua)) return 'win'
+      if (!/Macintosh/.test(ua) || navigator.maxTouchPoints > 1) return null // 后者是 iPad
+      const arch = await navigator.userAgentData?.getHighEntropyValues(['architecture']).then((v) => v.architecture, () => '')
+      return arch === 'arm' ? 'mac-arm64' : arch === 'x86' ? 'mac-x64' : null
+    }
+    async function latest() {
+      try {
+        const c = JSON.parse(localStorage.getItem(KEY))
+        if (c && Date.now() - c.at < 30 * 60e3) return c
+      } catch {}
+      const r = await fetch('https://api.github.com/repos/sqfcyily/deva/releases/latest')
+      if (!r.ok) throw new Error(`GitHub API ${r.status}`)
+      const rel = await r.json()
+      const files = {}
+      for (const [k, re] of Object.entries(PICK)) {
+        const a = rel.assets.find((x) => re.test(x.name))
+        if (a) files[k] = { name: a.name, size: a.size, url: a.browser_download_url }
+      }
+      const c = { at: Date.now(), tag: rel.tag_name, date: rel.published_at.slice(0, 10), files }
+      try { localStorage.setItem(KEY, JSON.stringify(c)) } catch {}
+      return c
+    }
+    Promise.all([latest(), detect()]).then(([rel, os]) => {
+      document.querySelector('.dl__ver').textContent = `（${rel.tag}，${rel.date} 发布）`
+      document.querySelectorAll('.file[data-asset]').forEach((el) => {
+        const f = rel.files[el.dataset.asset]
+        if (!f) return
+        el.href = f.url
+        el.querySelector('code').textContent = f.name
+        el.querySelector('.file__size').textContent = ` · ${Math.round(f.size / 1048576)} MB`
+      })
+      const f = os && rel.files[os]
+      if (!f) return
+      document.querySelectorAll('[data-dl-auto]').forEach((el) => {
+        el.href = f.url
+        el.title = f.name
+        const t = el.querySelector('.dl-label')
+        if (t) t.textContent = LABEL[os]
+      })
+    }).catch(() => {})
+  })()
+
+  // 演示：同一个对话分 9 章，区块进入视野后自动播放，每章播完停留片刻进下一章，末章之后从头循环；不接管滚轮，页面照常滚动。
   // 每章是一段「模拟真实使用」的脚本：输入框打字发送 → 助手思考 → 流式输出 / 工具调用 / 卡片交互。
-  // 往回滚或跳章时，先把之前各章瞬时重建成结束态，再播放目标章；触屏没有滚轮，按区块内滚动进度切换。
-  (() => {
+  // 跳章时先把之前各章瞬时重建成结束态，再播放目标章（往回则直接呈现目标章结束态）；离开视野或切到后台时停在当前章。
+  ;(() => {
     const stage = document.getElementById('stage')
     if (!stage) return
     const $ = (s) => stage.querySelector(s)
@@ -799,7 +894,6 @@
     const bar = $('.stage__progress i')
     const PH = input.textContent
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
-    const navH = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 64
 
     // ---------- 播放原语 ----------
     // run：动画批次号，切章即 +1；旧批次的等待醒来发现批次已变就中止。instant：瞬时模式，重建结束态时不等待、不做动画。
@@ -1089,7 +1183,7 @@
     async function play(k) {
       try { await CH[k]() } catch (e) { if (e !== CANCEL) throw e }
     }
-    // 说明条横向切入：往下滚从右侧进、往上滚从左侧进，旧的反向滑出
+    // 说明条横向切入：往前从右侧进、往回从左侧进，旧的反向滑出
     function caption(k, dir) {
       caps.forEach((c, i) => {
         if (i === k) {
@@ -1114,72 +1208,44 @@
     }
 
     let shown = -1
-    function show(k) {
-      if (k === shown) return
-      const dir = k > shown ? 1 : -1
+    // dir：1 往前（播放该章）/ -1 往回（直接呈现该章结束态）；返回该章播完（或被打断）时落定的 Promise
+    function show(k, dir) {
       run++ // 作废进行中的动画
       shown = k
       caption(k, dir)
       rowSub.textContent = SUB[k]
       restart(rowSub, 'swap')
       if (dir < 0) {
-        // 往回：直接呈现该章结束态
-        build(k).then(() => list.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 260 }))
-        return
+        return build(k).then(() => { list.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 260 }) })
       }
-      build(k - 1).then(() => (reduce ? build(k) : play(k)))
+      return build(k - 1).then(() => (reduce ? build(k) : play(k)))
     }
 
-    // ---------- 滚动驱动 ----------
-    let holdUntil = 0
-    let lockUntil = 0
-    const span = () => stage.offsetHeight - (innerHeight - navH())
-    const posOf = (k) => stage.getBoundingClientRect().top + scrollY - navH() + span() * (k + 0.5) / n
-    const pinned = () => {
-      const r = stage.getBoundingClientRect()
-      return r.top <= navH() + 4 && r.bottom >= innerHeight - 4
+    // ---------- 自动播放 ----------
+    // 每章播完停留 HOLD 再进下一章；只在区块可见、页面在前台时推进
+    const HOLD = 2800
+    let timer = 0
+    let ended = false // 当前章已播完，等着进下一章
+    let visible = false
+    const schedule = () => {
+      clearTimeout(timer)
+      if (ended && visible && !document.hidden) timer = setTimeout(() => go(shown + 1, 1), HOLD)
     }
-    const goTo = (k) => {
-      holdUntil = performance.now() + 900
-      show(k)
-      scrollTo({ top: posOf(k), behavior: reduce ? 'auto' : 'smooth' })
+    function go(k, dir) {
+      clearTimeout(timer)
+      ended = false
+      const done = show((k + n) % n, dir)
+      const id = run
+      done.then(() => { if (id === run) { ended = true; schedule() } })
     }
-    const onScroll = () => {
-      if (performance.now() < holdUntil) return
-      const top = stage.getBoundingClientRect().top
-      if (shown < 0 && top > innerHeight * 0.6) return
-      const p = (navH() - top) / span()
-      show(Math.max(0, Math.min(n - 1, Math.floor(p * n))))
-    }
-    // 一次手势只推一章：切换后锁定，直到滚轮静止一小会儿（挡住触控板惯性连发）
-    const step = (dir, e) => {
-      if (shown < 0 || !pinned()) return
-      const now = performance.now()
-      if (now < lockUntil) {
-        e.preventDefault()
-        lockUntil = Math.max(lockUntil, now + 160)
-        return
-      }
-      const next = shown + dir
-      if (next < 0 || next >= n) return
-      e.preventDefault()
-      lockUntil = now + 700
-      goTo(next)
-    }
-    addEventListener('wheel', (e) => {
-      if (e.ctrlKey || Math.abs(e.deltaY) < 3) return
-      step(e.deltaY > 0 ? 1 : -1, e)
-    }, { passive: false })
-    addEventListener('keydown', (e) => {
-      if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return
-      const k = e.key
-      const dir = k === 'ArrowDown' || k === 'PageDown' || (k === ' ' && !e.shiftKey) ? 1
-        : k === 'ArrowUp' || k === 'PageUp' || (k === ' ' && e.shiftKey) ? -1 : 0
-      if (dir) step(dir, e)
-    })
-    addEventListener('scroll', onScroll, { passive: true })
-    addEventListener('resize', onScroll)
-    onScroll()
+    $('.stage__nav--prev').addEventListener('click', () => go((shown > 0 ? shown : n) - 1, -1))
+    $('.stage__nav--next').addEventListener('click', () => go(shown + 1, 1))
+    new IntersectionObserver(([e]) => {
+      visible = e.isIntersecting
+      if (visible && shown < 0) go(0, 1)
+      else schedule()
+    }, { threshold: 0.4 }).observe(stage)
+    document.addEventListener('visibilitychange', schedule)
   })()
 </script>
 </body>
