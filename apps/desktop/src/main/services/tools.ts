@@ -137,6 +137,22 @@ export const toolSpecs: ToolSpec[] = [
     }
   },
   {
+    name: 'present_files',
+    description:
+      '把本次任务产出的成品文件交付给用户：对话里会出现一张交付卡，用户可直接看到缩略图、用默认应用打开或在文件夹中定位。适用：生成的网页、文档、表格、演示稿、图片、音视频、数据导出等需要用户查看或使用的成品。不适用：中间产物、临时脚本，以及只是修改项目源码的编程任务。在文件全部写好、任务收尾时调用一次，列出全部成品（最多 20 个）；网站等多文件产物只交付入口文件（如 index.html）。调用后照常用文字简要说明交付了什么。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '成品文件路径列表：绝对路径，或相对已挂载工作区的路径。'
+        }
+      },
+      required: ['paths']
+    }
+  },
+  {
     name: 'run_command',
     description:
       '执行一条 shell 命令并返回标准输出/错误与退出码（非交互、一次性）。用于构建、测试、git、脚本等。' +
@@ -535,7 +551,9 @@ const READ_TOOLS = new Set([
   // exit_plan：提交计划，循环内「闸门前特判」，恒不落到 executeTool；列此仅兜底。
   'exit_plan',
   // todo_write：只写会话边车（待办清单），同为闸门前特判；列此仅兜底。
-  'todo_write'
+  'todo_write',
+  // 交付文件：只核对文件存在，不读内容、不写盘；打开文件的是用户在交付卡上的点击。
+  'present_files'
 ])
 
 /** 已连接 MCP 服务注册的命名空间化工具名（serverId__toolName）。连接时注册、断开时反注册。 */
@@ -572,6 +590,11 @@ export interface ToolResult {
   isError?: boolean
   /** 随结果附带的图片（原样进 ToolResultPart.images）；content 仍须有一句文字说明。 */
   images?: ImagePart[]
+  /**
+   * present_files 成功时交付的文件（绝对路径、已去重）：循环把它记入会话边车 delivered，交付卡据此绘制。
+   * 不进模型上下文。
+   */
+  delivered?: string[]
 }
 
 const MAX_READ_BYTES = 2 * 1024 * 1024
@@ -668,6 +691,9 @@ export function writeTargetPath(
   const abs = toAbsPath(root, p)
   return { abs, dir: dirname(abs) }
 }
+
+/** present_files 一次最多交付的文件数。 */
+const PRESENT_MAX = 20
 
 /** 扫描类工具：省略 path 即隐含「项目根」，未挂载工作区时没有默认根可用。 */
 const SCAN_TOOLS = new Set(['list_dir', 'glob', 'grep'])
@@ -1185,6 +1211,53 @@ export async function executeTool(
       return {
         content: (numbered || '（空文件）') + (notes.length ? `\n\n（${notes.join('')}）` : ''),
         summary: ranged ? `第 ${start}–${end}/${total} 行` : `${total} 行`
+      }
+    }
+
+    if (name === 'present_files') {
+      // 只核对、不读内容：解析后的路径经 delivered 交给循环记入边车，交付卡据此绘制。有一个路径不对就
+      // 整次报错，让模型修正后重新交付——交付卡只出现在成功的调用上，卡上每个文件交付时都确实存在。
+      const list = Array.isArray(a.paths) ? a.paths : []
+      if (list.length === 0)
+        return { content: '缺少 paths 参数：请列出要交付的文件路径。', summary: '参数无效', isError: true }
+      if (list.length > PRESENT_MAX)
+        return {
+          content: `一次最多交付 ${PRESENT_MAX} 个文件，请只列出最主要的成品。`,
+          summary: '文件过多',
+          isError: true
+        }
+      const files: string[] = []
+      const bad: string[] = []
+      const seen = new Set<string>()
+      for (const p of list) {
+        let abs: string
+        try {
+          abs = resolvePath(ctx.workspaceRoot, p)
+        } catch (e) {
+          bad.push(`${String(p)}：${(e as Error).message}`)
+          continue
+        }
+        if (seen.has(abs)) continue
+        seen.add(abs)
+        const stat = await fs.stat(abs).catch(() => null)
+        if (!stat) bad.push(`${abs}：文件不存在`)
+        else if (!stat.isFile())
+          bad.push(`${abs}：不是文件（目录请改为交付其中的入口文件，如 index.html）`)
+        else files.push(abs)
+      }
+      if (bad.length)
+        return {
+          content: `以下路径无法交付，请修正后重新调用（本次未向用户展示任何文件）：\n${bad.map((l) => `- ${l}`).join('\n')}`,
+          summary: `${bad.length} 个路径无效`,
+          isError: true
+        }
+      // 成功时只回一句：路径已在调用参数里，再列一遍只是白占上下文（失败时逐条列原因，模型要据此修正）。
+      // 合并过重复路径就说一声，免得模型对着「传了 2 个、展示 1 个」以为自己没传对。
+      const merged = list.length > files.length ? '（重复的路径已合并为一个。）' : ''
+      return {
+        content: `已向用户展示 ${files.length} 个文件。${merged}`,
+        summary: `${files.length} 个文件`,
+        delivered: files
       }
     }
 

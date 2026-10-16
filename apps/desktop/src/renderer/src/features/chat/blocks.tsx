@@ -28,13 +28,15 @@ import {
   ClipboardCheck,
   Brain,
   FolderOpen,
-  ListChecks
+  ListChecks,
+  Package
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ChatBlock, ChatMessage, StreamStatus, ToolStatus } from '../../store/chat'
 import { Markdown } from './Markdown'
 import { HumationFace } from '../../components/humation'
 import { TaskConfirmCard } from './TaskConfirmCard'
+import { DeliverablesCard } from './DeliverablesCard'
 import { TodoItemList } from './Todos'
 
 /**
@@ -58,7 +60,9 @@ const TOOL_META: Record<string, { icon: React.ReactNode; key: string }> = {
   memory_write: { icon: <Brain size={14} />, key: 'chat.tool.memoryWrite' },
   memory_delete: { icon: <Brain size={14} />, key: 'chat.tool.memoryDelete' },
   // 正常的 todo_write 不画工具卡（进度在胶囊里）；只有参数被输出上限截断的那次会以普通工具卡出现。
-  todo_write: { icon: <ListChecks size={14} />, key: 'chat.tool.todoWrite' }
+  todo_write: { icon: <ListChecks size={14} />, key: 'chat.tool.todoWrite' },
+  // 成功的 present_files 画交付卡；执行中 / 失败（路径不对）时以普通工具卡出现。
+  present_files: { icon: <Package size={14} />, key: 'chat.tool.presentFiles' }
 }
 
 /**
@@ -325,6 +329,7 @@ export function BlockView({
   }
 
   if (block.kind === 'tool') {
+    if (block.name === 'present_files' && block.status === 'ok') return <DeliverablesCard block={block} />
     const meta = TOOL_META[block.name] ?? { icon: <Wrench size={14} />, key: 'chat.tool.unknown' }
     const hint = argHint(block.args)
     return (
@@ -977,7 +982,8 @@ export function groupBlocks(blocks: ChatBlock[]): BlockItem[] {
   }
 
   blocks.forEach((b, i) => {
-    if (b.kind === 'tool') {
+    // 成功的交付文件自成一张交付卡，不折进工具组；执行中 / 失败的交付调用与普通工具一样可折叠。
+    if (b.kind === 'tool' && !(b.name === 'present_files' && b.status === 'ok')) {
       run.push({ block: b, index: i })
       tools.push(b)
     } else if (((b.kind === 'text' && !b.text.trim()) || b.kind === 'step') && tools.length > 0) {

@@ -23,6 +23,7 @@ import { registerAttachmentsIpc } from './services/attachments'
 import { registerTerminalIpc } from './services/terminal'
 import { registerGitIpc } from './services/git'
 import { registerClipboardIpc } from './services/clipboard'
+import { registerDeliverablesIpc } from './services/deliverables'
 import { registerTasksIpc } from './services/tasks'
 import { startScheduler } from './services/scheduler'
 import { registerRemoteIpc, stopAllChannels } from './services/remote'
@@ -295,6 +296,9 @@ if (!app.requestSingleInstanceLock()) {
 
   // 系统剪贴板（原生 clipboard，供终端右键复制/粘贴——sandbox 下比 navigator.clipboard 可靠）
   registerClipboardIpc()
+
+  // 交付卡（present_files）：文件信息与缩略图、用默认应用打开、在文件夹中显示（只作用于该对话里交付的文件）
+  registerDeliverablesIpc()
 
   // 定时任务 / 自动任务（全局 ~/.deva/tasks.json；创建时批准、执行时零交互）。
   registerTasksIpc(() => mainWindow)

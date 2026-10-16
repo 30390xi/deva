@@ -1316,6 +1316,155 @@ textarea {
   color: var(--success);
 }
 
+/* 交付卡（present_files）：成品文件逐行列出——缩略图 + 文件名 / 大小·目录 + 打开 / 在文件夹中显示 / 复制路径。
+   点标题收起整张卡（默认展开），收起时标题后带「首个文件名 等 N 个文件」。 */
+.deliv__head {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.deliv.is-open .deliv__head {
+  border-bottom-color: var(--border);
+}
+.deliv__caret {
+  flex: none;
+  color: var(--fg-subtle);
+  transition: transform 0.15s ease;
+}
+.deliv.is-open .deliv__caret {
+  transform: rotate(90deg);
+}
+.deliv__summary {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+.deliv__count {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.deliv__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.deliv__item + .deliv__item {
+  border-top: 1px solid var(--border);
+}
+.deliv__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.deliv__main:disabled {
+  cursor: default;
+}
+.deliv__thumb {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--fg-muted);
+}
+.deliv__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.deliv__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.deliv__name,
+.deliv__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deliv__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.deliv__main:not(:disabled):hover .deliv__name {
+  color: var(--accent);
+}
+.deliv__sub {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.deliv__item.is-missing .deliv__name {
+  color: var(--fg-muted);
+}
+.deliv__item.is-missing .deliv__thumb {
+  opacity: 0.5;
+}
+.deliv__actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+}
+.deliv__act {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.deliv__act:not(:disabled):hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.deliv__act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.deliv__more {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.deliv__more:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
 /* 角色名片（propose_agent 提议）：微信名片式紧凑卡。pending 可点，accepted/rejected 终态弱化。 */
 .agentcard {
   display: flex;

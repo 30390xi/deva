@@ -623,6 +623,7 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
     s.proposals = {}
     s.asks = {}
     s.summaries = {}
+    s.delivered = {}
     s.plans = {}
     s.autotasks = {}
     s.todos = []
@@ -682,6 +683,7 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
   s.proposals = prune(s.proposals)
   s.asks = prune(s.asks)
   s.summaries = prune(s.summaries)
+  s.delivered = prune(s.delivered)
   s.plans = prune(s.plans)
   // autotasks 边车随名片 tool_use 存活；删除对话轮不删已创建的定时任务本体（任务独立生命周期，经「定时任务」页管理）。
   s.autotasks = prune(s.autotasks)
@@ -1308,6 +1310,7 @@ interface RewindUndo {
     proposals: StoredSession['proposals']
     asks: StoredSession['asks']
     summaries: StoredSession['summaries']
+    delivered: StoredSession['delivered']
     background: StoredSession['background']
     plans: StoredSession['plans']
     autotasks: StoredSession['autotasks']
@@ -1611,7 +1614,9 @@ const SUBAGENT_EXCLUDED = new Set([
   'create_task',
   'memory_write',
   'memory_delete',
-  'todo_write'
+  'todo_write',
+  // 交付物由主智能体在收尾时呈给用户；子智能体的产出经结论交回主智能体。
+  'present_files'
 ])
 
 /** 可在同一步内并发执行的内置只读工具：无副作用、彼此无先后依赖（见工具循环的 readRuns）。 */
@@ -2988,6 +2993,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           }
         }
         if (res.summary) args.onToolSummary?.(tc.id, res.summary)
+        // 交付文件：解析后的路径记入会话边车（须在发 tool_result 之前——渲染层收到成功即来取）。
+        // 历史里保留模型原样发出的参数，见 StoredSession.delivered。
+        if (res.delivered && !isSub) {
+          const s = getSession(sessionId)
+          if (s) s.delivered = { ...s.delivered, [tc.id]: res.delivered }
+        }
         emit(turnId, sessionId, {
           type: 'tool_result',
           id: tc.id,
@@ -3965,6 +3976,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             proposals: s.proposals,
             asks: s.asks,
             summaries: s.summaries,
+            delivered: s.delivered,
             background: s.background,
             plans: s.plans,
             autotasks: s.autotasks,

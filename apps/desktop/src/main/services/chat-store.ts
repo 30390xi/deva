@@ -103,6 +103,12 @@ export interface StoredSession {
    */
   summaries?: Record<string, string>
   /**
+   * 交付文件（present_files）边车，按 toolUseId 记录这次交付的文件：已解析为绝对路径（相对路径以调用时的
+   * 工作区为基准）并去重。交付卡与「打开 / 在文件夹中显示」据此取路径；messages 里保留模型原样发出的参数——
+   * 改写它会让模型看到的调用与它发出的不符，误以为自己没照做而反复重试。按轮删除时随 tool_use 修剪。
+   */
+  delivered?: Record<string, string[]>
+  /**
    * 后台子智能体（run_in_background）的状态边车，按开出它的 run_subagent / send_to_subagent 调用 id 记录。
    * 历史里那条调用的 tool_result 只是「已在后台启动」，真正的结局在回合之外才揭晓，故 Task 卡的终态记在这里：
    * running=派出时写入（进程退出后仍是 running 即视为被中断），ok / error=结束时改写。按轮删除时随 tool_use 修剪。

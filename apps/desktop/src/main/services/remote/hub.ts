@@ -368,18 +368,25 @@ const TOOL_LABELS: Record<string, string> = {
   memory_write: '写入记忆',
   memory_delete: '删除记忆',
   create_mcp: '配置 MCP',
-  todo_write: '更新待办清单'
+  todo_write: '更新待办清单',
+  present_files: '交付文件'
 }
 
 function toolBrief(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const a = args as Record<string, unknown>
+  const clip = (s: string): string => {
+    const one = s.trim().replace(/\s+/g, ' ')
+    return one.length > 80 ? `${one.slice(0, 80)}…` : one
+  }
   for (const k of ['command', 'path', 'pattern', 'url', 'query', 'name', 'key']) {
     const v = a[k]
-    if (typeof v === 'string' && v.trim()) {
-      const one = v.trim().replace(/\s+/g, ' ')
-      return one.length > 80 ? `${one.slice(0, 80)}…` : one
-    }
+    if (typeof v === 'string' && v.trim()) return clip(v)
+  }
+  // present_files：列出交付的文件名
+  if (Array.isArray(a.paths)) {
+    const names = a.paths.filter((p): p is string => typeof p === 'string').map((p) => p.split(/[\\/]/).pop() ?? p)
+    if (names.length) return clip(names.join('、'))
   }
   return ''
 }
