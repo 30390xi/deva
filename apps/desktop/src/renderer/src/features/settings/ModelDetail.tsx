@@ -14,7 +14,7 @@ import {
 } from '../../../../shared/context'
 
 /**
- * 模型详情页（设置 › 模型 › 服务商 › 模型）：改显示名、上下文窗口、最大输出长度。
+ * 模型详情页（设置 › 模型 › 服务商 › 模型）：改模型名称、上下文窗口、最大输出长度。
  * 两项上限留「自动」即走内置表 / 引擎默认（shared/context.ts），主进程每次请求现查，改了即对下一次请求生效。
  */
 
@@ -56,10 +56,6 @@ export function ModelDetail({ provider, model, onBack, onUpdate }: Props): React
           {t('models.backTo').replace('{name}', provider.name)}
         </button>
       </div>
-      <header className="provider-detail__head model-detail__head">
-        <h2 className="provider-detail__name">{model.name}</h2>
-        {model.name !== model.id && <span className="model-detail__id">{model.id}</span>}
-      </header>
 
       <div className="field">
         <label className="field__label">{t('models.displayName')}</label>

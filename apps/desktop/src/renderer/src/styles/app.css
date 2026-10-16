@@ -4219,16 +4219,7 @@ button.projmenu__item:disabled {
   color: var(--fg-subtle);
 }
 
-/* 模型详情页（显示名 / 上下文窗口 / 最大输出长度） */
-.model-detail__head {
-  flex-wrap: wrap;
-  row-gap: var(--space-1);
-}
-.model-detail__id {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  color: var(--fg-subtle);
-}
+/* 模型详情页（模型名称 / 上下文窗口 / 最大输出长度） */
 .model-limit__input {
   max-width: 280px;
   margin-top: var(--space-2);
