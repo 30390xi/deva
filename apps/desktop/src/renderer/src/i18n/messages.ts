@@ -525,7 +525,7 @@ const zhCN: MessageTree = {
       downloading: '正在下载 {percent}%',
       downloaded: '新版本 {version} 已下载',
       install: '重启并安装',
-      installHint: 'Deva 会关闭并安装新版本，装完自动重新打开；不点的话，下次退出 Deva 时也会装上。',
+      installHint: '安装期间 Deva 将自动重启。如暂不安装，更新将在下次退出 Deva 时自动完成。',
       checkFailed: '检查更新失败',
       downloadFailed: '下载更新失败',
       retry: '重试',
@@ -1482,7 +1482,7 @@ const en: MessageTree = {
       downloaded: 'Version {version} downloaded',
       install: 'Restart and install',
       installHint:
-        'Deva will close, install the new version, and reopen. If you skip this, it installs the next time you quit Deva.',
+        'Deva will restart to complete the installation. Otherwise, the update will be installed automatically the next time you quit Deva.',
       checkFailed: 'Couldn’t check for updates',
       downloadFailed: 'Couldn’t download the update',
       retry: 'Retry',
