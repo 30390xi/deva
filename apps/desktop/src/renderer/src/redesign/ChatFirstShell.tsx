@@ -400,7 +400,7 @@ export function ChatFirstShell(): React.JSX.Element {
     setTasksTarget(taskId)
     setRailTab('tasks')
   }
-  // 主进程导航意图（tasks:navigate）：通知点击带 `{sessionId}` → 打开该任务独占会话并回消息视图；
+  // 主进程导航意图（tasks:navigate）：通知点击带 `{sessionId}` → 打开该对话（定时任务独占会话 / 刚回复完的对话）并回消息视图；
   // 托盘「定时任务概览」带 `{pane:'tasks'}` → 切到 Tasks 标签。窗口从托盘唤起时随即落到目标视图。
   useEffect(() => {
     const off = window.deva?.tasks?.onNavigate?.((payload) => {

@@ -54,6 +54,7 @@ import { createTask, type CreateTaskResult } from './tasks'
 import type { TaskCreateInput, TaskRecord } from './tasks-types'
 import { dispatchMcpTool, getMcpToolSpecs } from './mcp'
 import { trustRoot } from './fs-guard'
+import { notifyNeedsInput, notifyReplyDone, type PendingInput } from './reply-notify'
 import {
   activeTodoList,
   applyTodoWrite,
@@ -1897,6 +1898,22 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   /** 正在手动压缩（/compact）的会话：期间不为后台任务通知起轮，免得与压缩同时改写 messages。 */
   const compacting = new Set<string>()
 
+  /** 手机端发起、仍在进行的回合：回复与交互卡都推到手机，桌面不再弹系统通知。 */
+  const remoteTurns = new Set<string>()
+
+  /** 系统通知标题：对话绑定的角色名，回落对话标题、Deva。 */
+  function notifyTitle(sessionId: string): string {
+    const s = getSession(sessionId)
+    const p = s?.personaId ? getPersona(s.personaId) : null
+    return p?.name || s?.title || 'Deva'
+  }
+
+  /** 回合停下来等用户处理：用户没在看 Deva 时弹系统通知（手机端发起的回合交互卡已推到手机）。 */
+  function notifyPending(turnId: string, sessionId: string, input: PendingInput): void {
+    if (remoteTurns.has(turnId)) return
+    notifyNeedsInput(getWindow, { sessionId, title: notifyTitle(sessionId), input })
+  }
+
   /** 后台子智能体 Task 卡的状态落边车（background + summaries），重开对话时据此还原。 */
   function setBackgroundState(
     sessionId: string,
@@ -1954,6 +1971,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   ): Promise<string[] | null> {
     const key = genId('ask')
     emit(turnId, sessionId, { type: 'ask_user', key, questions })
+    notifyPending(turnId, sessionId, { kind: 'ask', questions: questions.map((q) => q.question) })
     return new Promise((resolve) => pendingAsk.set(key, { resolve, turnId, sessionId }))
   }
 
@@ -1968,6 +1986,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   ): Promise<'approve' | 'keep' | null> {
     const key = genId('plan')
     emit(turnId, sessionId, { type: 'plan_review', key, plan })
+    notifyPending(turnId, sessionId, { kind: 'plan' })
     return new Promise((resolve) => pendingPlan.set(key, { resolve, turnId, sessionId }))
   }
 
@@ -1984,6 +2003,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   ): Promise<string | null> {
     const key = genId('mount')
     emit(turnId, sessionId, { type: 'mount_request', key, tool, path })
+    notifyPending(turnId, sessionId, { kind: 'mount' })
     return new Promise((resolve) => pendingMount.set(key, { resolve, turnId, sessionId }))
   }
 
@@ -3056,11 +3076,13 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     sessionId: string,
     turnId: string,
     config: ChatModelConfig,
-    workspaceRoot: string | null
+    workspaceRoot: string | null,
+    fromRemote = false
   ): Promise<void> {
     const controller = new AbortController()
     activeTurns.set(turnId, controller)
     busySessions.set(sessionId, turnId)
+    if (fromRemote) remoteTurns.add(turnId)
     const session = ensureSession(sessionId)
     // 聚焦工作区：本对话若挂载文件夹，用它作有效根（受信/在工作区内判定、终端 cwd、系统提示词聚焦、
     // 权限模式键均据此）；未挂载 → 回落 workspaceRoot（对话优先外壳恒 null，即全机通用助手）。
@@ -3107,8 +3129,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // 本轮提示缓存命中 / 写入量（纯观测，不参与判定），同样取最后一次。
     let lastCacheRead = 0
     let lastCacheWrite = 0
-    // 本轮如何结束（finally 据此决定要不要为排队的后台任务通知接着起一轮）。
+    // 本轮如何结束（finally 据此决定要不要为排队的后台任务通知接着起一轮、要不要提醒回复已完成）。
     let endReason: StopReason = 'error'
+    // 本轮最后一段助手正文 / 失败原因：回复完成提醒的通知正文。
+    let replyText = ''
+    let replyError: string | undefined
 
     // 本轮是否产出「可见回复」：本轮新增的任一 assistant 消息含非空正文或工具调用即算。
     // 与渲染层 hasVisibleAnswer 同义——决定自然结束却空回合时是否补「空回合」提示。
@@ -3177,7 +3202,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
     try {
       // 主轮 = depth 0：可问询、可派生子智能体、由本封装发终态 done（嵌套调用不发 done）。
-      const { stopReason, errorMessage } = await runAgentLoop({
+      const { stopReason, errorMessage, text } = await runAgentLoop({
         turnId,
         sessionId,
         history,
@@ -3255,13 +3280,17 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       // 终态提示持久化（须在 finally 落盘前执行）：错误红框 / 截断 / 空回合入 notices 边车。
       recordTurnNotice(stopReason, errorMessage)
       endReason = stopReason
+      replyText = text
+      replyError = errorMessage
     } catch (e) {
       const message = (e as Error)?.message ?? String(e)
       emit(turnId, sessionId, { type: 'error', kind: 'unknown', message })
       emit(turnId, sessionId, { type: 'done', stopReason: 'error' })
       recordTurnNotice('error', message)
+      replyError = message
     } finally {
       activeTurns.delete(turnId)
+      remoteTurns.delete(turnId)
       // 记录本轮真实输入 token 作为下轮压缩触发依据（比字符估算准，天然覆盖图片/工具）。
       // 缓存命中/写入量是纯观测字段（不参与任何判定），与 token 数同源同步——本轮没拿到真实
       // 用量（如秒中止）就整体不动，免得用 0 覆盖掉上一轮的有效读数。
@@ -3280,6 +3309,15 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       saveProject(sessionId)
       busySessions.delete(sessionId)
       collectBlobs(session)
+      // 用户没在看 Deva 时弹系统通知提醒回复已完成。不提醒：手机端发起的（回复已推到手机）、
+      // 用户按了停止的、退出途中被中止的。
+      if (endReason !== 'aborted' && !fromRemote && !shuttingDown)
+        notifyReplyDone(getWindow, {
+          sessionId,
+          title: notifyTitle(sessionId),
+          text: replyText,
+          error: endReason === 'error' ? (replyError ?? '') : undefined
+        })
       // 本轮最后一步之后才结束的后台子智能体：它们的通知还在队列里，现在为它们起一轮。
       // 用户刚按了停止就不起——通知留着，随下一条消息带给模型。
       if (endReason !== 'aborted') wakeForNotices(sessionId)
@@ -3423,7 +3461,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
    * 同一会话同时只能有一轮：两轮并发会交错改写同一份 messages。桌面层本就不会在流式中再发，
    * 这道闸主要拦「手机端正在跑、桌面又发了一条」（或反过来）——抛错由调用方转成提示。
    */
-  async function sendMessage(payload: ChatSendRequest): Promise<{ turnId: string }> {
+  async function sendMessage(payload: ChatSendRequest, fromRemote = false): Promise<{ turnId: string }> {
     const busyError = (): Error => new Error('这个对话正在进行中（可能由手机端或定时任务发起），请等它结束后再发。')
     if (busySessions.has(payload.sessionId)) throw busyError()
     const {
@@ -3513,7 +3551,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
     const turnId = genId('turn')
     emitTurnStart(turnId, sessionId, history)
-    void runTurn(sessionId, turnId, model, workspaceRoot)
+    void runTurn(sessionId, turnId, model, workspaceRoot, fromRemote)
     return { turnId }
   }
 
@@ -4083,7 +4121,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
   // 挂上模块级桥接，供远程通道（remote/hub.ts）跨模块直调——与桌面 IPC 走同一套入口。
   chatRuntime = {
-    send: sendMessage,
+    send: (req) => sendMessage(req, true),
     abort: abortTurn,
     answerAsk,
     decidePlan,

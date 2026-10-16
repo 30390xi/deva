@@ -1132,7 +1132,7 @@ const api = {
     },
     /**
      * 订阅 tasks:navigate 导航意图，返回取消订阅函数。
-     * 主进程发起：通知点击带 `{sessionId}`（打开该任务独占会话）；托盘「定时任务概览」带 `{pane:'tasks'}`（切到 Tasks 标签）。
+     * 主进程发起：通知点击带 `{sessionId}`（打开定时任务独占会话 / 刚回复完的对话）；托盘「定时任务概览」带 `{pane:'tasks'}`（切到 Tasks 标签）。
      */
     onNavigate: (cb: (payload: { sessionId?: string; pane?: 'tasks' }) => void): (() => void) => {
       const listener = (_e: unknown, payload: { sessionId?: string; pane?: 'tasks' }): void =>

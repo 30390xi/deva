@@ -14,9 +14,9 @@ import { execFileSync } from 'node:child_process'
 const REPO_URL = 'https://github.com/sqfcyily/deva'
 
 const GROUPS = [
-  { title: 'New Features / 新功能', types: ['feat'] },
-  { title: 'Bug Fixes / 问题修复', types: ['fix'] },
-  { title: 'Other Improvements / 其他改进', types: ['perf', 'refactor', null] } // null = 没按约定写前缀的提交
+  { title: '新功能 / New Features', types: ['feat'] },
+  { title: '问题修复 / Bug Fixes', types: ['fix'] },
+  { title: '其他改进 / Other Improvements', types: ['perf', 'refactor', null] } // null = 没按约定写前缀的提交
 ]
 const SKIP = new Set(['docs', 'style', 'build', 'chore', 'ci', 'test'])
 
@@ -59,10 +59,10 @@ const sections = []
 for (const [group, items] of buckets) {
   if (items.length) sections.push(`## ${group.title}\n\n${items.map((s) => `- ${s}`).join('\n')}`)
 }
-if (!sections.length) sections.push('No user-facing changes in this release. / 本版本没有面向用户的改动。')
+if (!sections.length) sections.push('本版本没有面向用户的改动。 / No user-facing changes in this release.')
 sections.push(
   prev
-    ? `**Full Changelog / 完整变更**: ${REPO_URL}/compare/${prev}...${tag}`
-    : `**Full Changelog / 完整变更**: ${REPO_URL}/commits/${tag}`
+    ? `**完整变更 / Full Changelog**: ${REPO_URL}/compare/${prev}...${tag}`
+    : `**完整变更 / Full Changelog**: ${REPO_URL}/commits/${tag}`
 )
 console.log(sections.join('\n\n'))
