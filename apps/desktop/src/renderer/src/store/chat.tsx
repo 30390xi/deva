@@ -22,6 +22,7 @@ import { useI18n } from '../i18n/i18n'
 import { useToast } from '../components/ToastProvider'
 import { useModels, findActive, hasUsableModel } from './models'
 import { useWorkspace } from './workspace'
+import { formatTokens } from '../../../shared/context'
 
 /**
  * 会话状态（渲染层）。
@@ -318,6 +319,8 @@ type StreamEvent =
       reason: 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
       attempt: number
       max: number
+      /** context：报错里解析出的真实窗口；output_limit：用户所设上限被拒后降到的值（见主进程 chat.ts）。 */
+      limit?: number
     }
   | { type: 'stream_reset' }
   | { type: 'error'; kind: string; message: string }
@@ -1328,6 +1331,18 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
           ...r,
           reconnecting: { attempt: ev.attempt, max: ev.max, reason: ev.reason }
         }))
+        // 自愈用到的上限与模型设置不符（窗口实际更小 / 所设输出上限被拒）：横幅转瞬即逝，另弹 toast
+        // 说明实际值并指向模型设置，用户才知道该去改哪里。
+        if (ev.limit && (ev.reason === 'context' || ev.reason === 'output_limit'))
+          toast.show({
+            variant: 'warning',
+            message: tRef.current(
+              ev.reason === 'context'
+                ? 'chat.notice.contextLimitLearned'
+                : 'chat.notice.outputLimitRejected'
+            ).replace('{n}', formatTokens(ev.limit)),
+            duration: 8000
+          })
         return
       }
       // 重连即将重跑当前步骤：丢弃这一步已画出的残缺尾部，避免重复内容。

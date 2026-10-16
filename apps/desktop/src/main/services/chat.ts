@@ -13,6 +13,7 @@ import {
   type ToolSpec
 } from '../providers/types'
 import { clampEffort, effortRequest, type EffortRequest } from '../../shared/effort'
+import { OUTPUT_BUDGET_SAFE, autoOutputBudget } from '../../shared/context'
 import {
   executeTool,
   isMcpTool,
@@ -48,7 +49,12 @@ import {
   type SubagentRecord
 } from './subagent-store'
 import { enabledPersonas, getPersona } from './personas'
-import { resolveDefaultModel, resolveModelRef, resolveModelRefOrNull } from './model-resolve'
+import {
+  modelOverrides,
+  resolveDefaultModel,
+  resolveModelRef,
+  resolveModelRefOrNull
+} from './model-resolve'
 import { sealedDecision } from './sealed'
 import { createTask, type CreateTaskResult } from './tasks'
 import type { TaskCreateInput, TaskRecord } from './tasks-types'
@@ -108,6 +114,7 @@ import {
   needsCompaction,
   needsCompactionMidTurn,
   NOTIFY_MARKER,
+  rememberContextLimit,
   stripMarker,
   type CompactModelConfig,
   type CompactStatus
@@ -971,8 +978,10 @@ export type ChatStreamEvent =
    * truncated=输出撞上长度上限，已引导模型续写 / 拆小；empty=上一步无任何输出，已追问；
    * context=上下文超限，已压缩后重试；output_limit=输出预算超出模型允许范围，已降档重发；
    * effort=模型 / 网关不认所选思考等级，已去掉该参数重发。
+   * limit：context 时 = 报错里解析出的真实窗口（比配置小才带）；output_limit 时 = 降档后的输出上限
+   * （仅当被拒的是用户在模型详情页填的值才带）。渲染层据此弹 toast，提示去模型设置里改。
    */
-  | { type: 'auto_retry'; reason: AutoRetryReason; attempt: number; max: number }
+  | { type: 'auto_retry'; reason: AutoRetryReason; attempt: number; max: number; limit?: number }
   | { type: 'error'; kind: string; message: string }
   /**
    * 上下文压缩结果（自动或手动 /compact）。渲染层据此在助手气泡追加软提示块；
@@ -1029,22 +1038,29 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 export type AutoRetryReason = 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
 
 /**
- * 每步输出预算（max_tokens）。旧的固定 8192 对带思考的新模型太小：思考吃光预算、一字未出就撞限，
- * 回合戛然而止（sess_muje1nu3_a 即此例）。Claude 系给宽裕值；其余维持原先的适配器默认，
- * 以免撞上不认大预算的网关。某模型拒绝该预算（400 output_limit）则进程内记住，降回保守值。
+ * 每步输出预算（max_tokens）：用户在模型详情页填的值 > 自动（shared/context.ts 的 autoOutputBudget：
+ * Claude 系 32K——旧的固定 8192 对带思考的新模型太小，思考吃光预算、一字未出就撞限，sess_muje1nu3_a
+ * 即此例；其余维持适配器 / 服务商默认，以免撞上不认大预算的网关）。
+ * 某模型拒绝该预算（400 output_limit）则进程内记住，降回保守值。键带预算值：用户改了设置就按新值重试。
  */
-const OUTPUT_BUDGET_WIDE = 32_000
-const OUTPUT_BUDGET_SAFE = 8192
-const outputBudgetDowngraded = new Set<string>()
-function outputBudget(model: { providerId: string; model: string }): number | undefined {
-  const key = `${model.providerId}:${model.model}`
-  if (outputBudgetDowngraded.has(key)) return OUTPUT_BUDGET_SAFE
-  return /claude/i.test(model.model) ? OUTPUT_BUDGET_WIDE : undefined
+const outputBudgetRejected = new Set<string>()
+function wantedOutputBudget(model: ChatModelConfig): number | undefined {
+  return (
+    modelOverrides(model.providerId, model.model).maxOutput ??
+    autoOutputBudget(model.adapter, model.model)
+  )
+}
+function outputBudgetKey(model: ChatModelConfig, budget: number | undefined): string {
+  return `${model.providerId}:${model.model}:${budget ?? 'default'}`
+}
+function outputBudget(model: ChatModelConfig): number | undefined {
+  const want = wantedOutputBudget(model)
+  return outputBudgetRejected.has(outputBudgetKey(model, want)) ? OUTPUT_BUDGET_SAFE : want
 }
 
 /**
  * 被拒过的思考等级（键 `providerId:model:level`）：某模型 / 网关不认该档参数（400 effort_unsupported）则进程内
- * 记住，此后按「默认」发（不带参数），同 outputBudgetDowngraded。键带档位：OpenAI 系常只缺 xhigh，换低一档仍可用。
+ * 记住，此后按「默认」发（不带参数），同 outputBudgetRejected。键带档位：OpenAI 系常只缺 xhigh，换低一档仍可用。
  */
 const effortRejected = new Set<string>()
 function effortKey(model: { providerId: string; model: string }, level: EffortLevel): string {
@@ -2414,7 +2430,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         step > 0 &&
         args.compact &&
         !controller.signal.aborted &&
-        needsCompactionMidTurn(history, model.model, usedInput, usedAt) &&
+        needsCompactionMidTurn(history, model, usedInput, usedAt) &&
         (await args.compact())
       )
         usedInput = 0 // 历史已改写，旧读数作废：回退估算，直到本步拿到新读数
@@ -2440,9 +2456,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         let fatal = false
         // 不可重试错误先扣下、不立即画红框：其中几类引擎能自愈（输出预算降档、上下文压缩后重发），
         // 流结束后再定夺；自愈不了才上报。
-        let fatalErr: { kind: string; message: string } | null = null
+        let fatalErr: { kind: string; message: string; limit?: number } | null = null
         // 每次（含重发）现算：本步刚因不认思考等级被拒时，重发即不再带该参数。
         const stepEffort = sentEffort(model, effort)
+        // 同理现算：本步刚因输出预算被拒时，重发即降回保守值。
+        const stepBudget = outputBudget(model)
 
         for await (const ev of streamChat(
           { adapter: model.adapter, providerId: model.providerId, baseURL: model.baseURL },
@@ -2452,7 +2470,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             messages: history,
             tools,
             signal: controller.signal,
-            maxTokens: outputBudget(model),
+            maxTokens: stepBudget,
             effort: stepEffort?.req,
             // 工具循环每步都要把 system + tools + 全量历史整个重发一遍，是提示缓存最典型的受益者
             // （Anthropic 才需显式断点；OpenAI/DeepSeek 自动命中，此开关对它们无作用）。
@@ -2521,7 +2539,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
               retryAfterMs = ev.error.retryAfterMs
             } else {
               fatal = true
-              fatalErr = { kind: ev.error.kind, message: ev.error.message }
+              fatalErr = { kind: ev.error.kind, message: ev.error.message, limit: ev.error.limit }
             }
           } else if (ev.type === 'done') {
             stopReason = ev.stopReason
@@ -2547,13 +2565,30 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             attempt--
             continue reconnect
           }
+          // 报错里写着真实窗口（中转把上游窗口开小、或用户填大了）→ 记住，此后压缩按它来。
+          const limitLearned =
+            fatalErr.limit !== undefined && rememberContextLimit(model, fatalErr.limit)
           // 自愈①：输出预算超出该模型允许范围 → 记住并降回保守值，重发本步（不计入重连次数）。
-          const key = `${model.providerId}:${model.model}`
-          if (fatalErr.kind === 'output_limit' && !outputBudgetDowngraded.has(key)) {
-            outputBudgetDowngraded.add(key)
+          // 本步已是保守值（或更小）时降档无益，直接交给下面的压缩自愈。
+          const wanted = wantedOutputBudget(model)
+          const budgetKey = outputBudgetKey(model, wanted)
+          if (
+            fatalErr.kind === 'output_limit' &&
+            (stepBudget === undefined || stepBudget > OUTPUT_BUDGET_SAFE) &&
+            !outputBudgetRejected.has(budgetKey)
+          ) {
+            outputBudgetRejected.add(budgetKey)
             console.warn('[chat] 输出预算被拒，降档重发：', fatalErr.message)
             if (!isSub) {
-              emit(turnId, sessionId, { type: 'auto_retry', reason: 'output_limit', attempt: 1, max: 1 })
+              // 被拒的是用户填的值：带上降档后的值，渲染层提示去模型设置里改。
+              const userSet = modelOverrides(model.providerId, model.model).maxOutput !== undefined
+              emit(turnId, sessionId, {
+                type: 'auto_retry',
+                reason: 'output_limit',
+                attempt: 1,
+                max: 1,
+                ...(userSet ? { limit: OUTPUT_BUDGET_SAFE } : {})
+              })
               emit(turnId, sessionId, { type: 'stream_reset' })
             }
             attempt--
@@ -2567,7 +2602,14 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             !contextRetried
           ) {
             contextRetried = true
-            if (!isSub) emit(turnId, sessionId, { type: 'auto_retry', reason: 'context', attempt: 1, max: 1 })
+            if (!isSub)
+              emit(turnId, sessionId, {
+                type: 'auto_retry',
+                reason: 'context',
+                attempt: 1,
+                max: 1,
+                ...(limitLearned ? { limit: fatalErr.limit } : {})
+              })
             if (await args.compact()) {
               usedInput = 0
               if (!isSub) emit(turnId, sessionId, { type: 'stream_reset' })
@@ -3111,7 +3153,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
     // 自动压缩：接近上下文窗口时，先把较早历史摘要替换，再进入本轮（一轮进行中另有逐步检查，见 compact）。
     // 失败 / 无需压缩都发事件供渲染层弱提示，且绝不阻断本轮（宁可这一轮不压也要照常回答）。
-    if (!controller.signal.aborted && needsCompaction(session, turnModel.model)) {
+    if (!controller.signal.aborted && needsCompaction(session, turnModel)) {
       try {
         const r = await compactSession({ session, model: turnModel, signal: controller.signal })
         // 失败原因落主进程日志：渲染层虽已展示，但后台回合（定时任务）无人盯着，日志是唯一痕迹。
@@ -3388,7 +3430,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
     // 自动压缩：任务多次触发累积于同一会话，接近窗口即先摘要替换早期历史（失败/无需都不阻断本轮）。
     // history 已在上面捕获——compactSession 就地改写 messages，这个引用压缩后依然有效。
-    if (!controller.signal.aborted && needsCompaction(session, turnModel.model)) {
+    if (!controller.signal.aborted && needsCompaction(session, turnModel)) {
       try {
         const r = await compactSession({ session, model: turnModel, signal: controller.signal })
         // 失败原因落主进程日志：渲染层虽已展示，但后台回合（定时任务）无人盯着，日志是唯一痕迹。

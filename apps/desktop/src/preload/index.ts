@@ -681,6 +681,8 @@ export type ChatStreamEvent =
       reason: 'truncated' | 'empty' | 'context' | 'output_limit' | 'effort'
       attempt: number
       max: number
+      /** context：报错里解析出的真实窗口；output_limit：用户所设输出上限被拒后降到的值。 */
+      limit?: number
     }
   | { type: 'stream_reset' }
   | { type: 'error'; kind: string; message: string }

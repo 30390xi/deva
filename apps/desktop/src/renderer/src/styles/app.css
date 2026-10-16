@@ -4208,6 +4208,64 @@ button.projmenu__item:disabled {
   color: var(--fg-muted);
   font-size: 10px;
 }
+/* 改过显示名时，名称后附真实模型 ID */
+.model-row__id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+/* 模型详情页（显示名 / 上下文窗口 / 最大输出长度） */
+.model-detail__head {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.model-detail__id {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+.model-limit__input {
+  max-width: 280px;
+  margin-top: var(--space-2);
+}
+.model-limit__unit {
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+.model-limit__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.model-limit__preset {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.model-limit__preset:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.model-limit__preset.is-active {
+  border-color: transparent;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.model-detail__reset {
+  max-width: 620px;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
 
 /* 服务商详情：可编辑名称 / 删除 / 无钥提醒 */
 .provider-detail__name-input {

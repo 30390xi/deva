@@ -25,9 +25,11 @@ import {
   type ProviderPurpose
 } from '../../mock/models'
 import { Switch } from './Switch'
+import { ModelDetail } from './ModelDetail'
 
 /**
- * 模型设置页（设置 › 模型）。钻取式（主从抽屉）导航：列表态只列服务商，点进去为配置详情 + 返回。
+ * 模型设置页（设置 › 模型）。钻取式（主从抽屉）导航：列表态只列服务商，点进去为配置详情 + 返回；
+ * 详情里每个模型再可点「编辑」进模型详情页（显示名 / 上下文窗口 / 最大输出长度，见 ModelDetail）。
  * 同一时刻单列，避免把设置弹框撑宽。
  * 支持官方与自定义（OpenAI / Anthropic 兼容）服务：配置密钥 / 协议 / 地址 / 模型清单，设默认模型，
  * 并可从服务端拉取模型清单辅助添加（支持手动输入与匹配选择）。
@@ -45,6 +47,7 @@ export function ModelSettings(): React.JSX.Element {
     selectProvider,
     updateProvider,
     toggleModel,
+    updateModel,
     addModel,
     addModels,
     removeModel,
@@ -56,8 +59,9 @@ export function ModelSettings(): React.JSX.Element {
     secretsAvailable
   } = useModels()
 
-  // 钻取导航：'list' 浏览服务商列表，'detail' 编辑单个服务商
-  const [view, setView] = useState<'list' | 'detail'>('list')
+  // 钻取导航：'list' 浏览服务商列表，'detail' 编辑单个服务商，'model' 编辑该服务商下的单个模型
+  const [view, setView] = useState<'list' | 'detail' | 'model'>('list')
+  const [editingModelId, setEditingModelId] = useState<string | null>(null)
   const [showKey, setShowKey] = useState(false)
   const [addingModel, setAddingModel] = useState(false)
   const [newModelId, setNewModelId] = useState('')
@@ -96,6 +100,9 @@ export function ModelSettings(): React.JSX.Element {
 
   // 卸载时清理防抖计时器，避免泄漏与卸载后 setState
   useEffect(() => () => clearKeyTimer(), [])
+
+  // 正在编辑的模型；被删 / 换了服务商则为 undefined，渲染回落到服务商详情。
+  const editingModel = selectedProvider?.models.find((mm) => mm.id === editingModelId)
 
   const seedHost = useMemo(
     () => seedProviders.find((p) => p.id === selectedProviderId)?.apiHost,
@@ -203,6 +210,12 @@ export function ModelSettings(): React.JSX.Element {
   const openProvider = (id: string): void => {
     selectProvider(id)
     setView('detail')
+  }
+
+  // 模型行「编辑」：钻入模型详情页
+  const openModel = (id: string): void => {
+    setEditingModelId(id)
+    setView('model')
   }
 
   // 新建自定义服务商后直接进入其详情编辑（addCustomProvider 已把它设为选中项）。
@@ -330,7 +343,15 @@ export function ModelSettings(): React.JSX.Element {
 
   return (
     <div className="models">
-      {view === 'list' || !selectedProvider ? (
+      {view === 'model' && selectedProvider && editingModel ? (
+        <ModelDetail
+          key={`${selectedProvider.id}:${editingModel.id}`}
+          provider={selectedProvider}
+          model={editingModel}
+          onBack={() => setView('detail')}
+          onUpdate={(patch) => updateModel(selectedProvider.id, editingModel.id, patch)}
+        />
+      ) : view === 'list' || !selectedProvider ? (
         /* 列表态：扁平行列表，与通用/扩展页同构；右上角图标按钮新增服务商 */
         <>
           <div className="models__head">
@@ -671,12 +692,21 @@ export function ModelSettings(): React.JSX.Element {
               {selectedProvider.models.map((mo) => (
                 <div key={mo.id} className="model-row">
                   <span className="model-row__name">{mo.name}</span>
+                  {mo.name !== mo.id && <span className="model-row__id">{mo.id}</span>}
                   {mo.tags?.map((tg) => (
                     <span key={tg} className="model-tag">
                       {tg}
                     </span>
                   ))}
                   <div className="model-row__spacer" />
+                  <button
+                    className="icon-btn model-row__act"
+                    title={t('models.editModel')}
+                    aria-label={t('models.editModel')}
+                    onClick={() => openModel(mo.id)}
+                  >
+                    <Pencil size={14} />
+                  </button>
                   <button
                     className="icon-btn model-row__act"
                     title={t('models.remove')}

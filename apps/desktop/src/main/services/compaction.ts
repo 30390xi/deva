@@ -3,6 +3,8 @@ import type { ContentPart, Message } from '../providers/types'
 import { getConfig } from './config'
 import { save as saveProject, type StoredSession } from './chat-store'
 import { todoSnapshotText } from './todos'
+import { modelOverrides } from './model-resolve'
+import { DEFAULT_CONTEXT_WINDOW, autoContextWindow, autoOutputBudget } from '../../shared/context'
 
 /**
  * 上下文压缩（主进程）。
@@ -46,7 +48,11 @@ interface CompactionCfg {
   defaultWindow: number
 }
 
-const DEFAULTS: CompactionCfg = { enabled: true, triggerRatio: 0.75, defaultWindow: 128_000 }
+const DEFAULTS: CompactionCfg = {
+  enabled: true,
+  triggerRatio: 0.75,
+  defaultWindow: DEFAULT_CONTEXT_WINDOW
+}
 
 /** 从 config.json 的 `compaction` 段读配置（明文可手改即设置面），非法值回退默认。 */
 export function compactionConfig(): CompactionCfg {
@@ -64,29 +70,47 @@ export function compactionConfig(): CompactionCfg {
   }
 }
 
-// 模型 → 上下文窗口（token）近似表；子串命中，够用即可。id 内自带窗口者优先解析（见 windowForModel）。
-const WINDOW_TABLE: { match: RegExp; window: number }[] = [
-  { match: /claude/i, window: 200_000 },
-  { match: /gemini/i, window: 1_000_000 },
-  { match: /(gpt|o[13])/i, window: 128_000 },
-  { match: /deepseek/i, window: 128_000 },
-  { match: /glm/i, window: 128_000 },
-  { match: /qwen2/i, window: 32_000 }, // 通义开源系（多经 Ollama 本地跑）：保守
-  { match: /qwen-?max/i, window: 32_000 },
-  { match: /qwen/i, window: 128_000 },
-  { match: /moonshot|kimi/i, window: 128_000 },
-  { match: /llama/i, window: 32_000 } // 本地 Llama：有效窗口常远小于标称，保守
-]
+/** 窗口 / 输出上限的取值依据：协议（定「自动」输出上限）+ 服务商 + 模型 ID（查用户覆盖值）。 */
+type LimitModelRef = Pick<CompactModelConfig, 'adapter' | 'providerId' | 'model'>
 
-/** 估算某模型的上下文窗口：id 自带（如 -128k）> 内置表 > 全局默认。 */
-export function windowForModel(modelId: string, fallback: number): number {
-  const km = /(\d+)k\b/i.exec(modelId)
-  if (km) {
-    const n = Number(km[1])
-    if (n >= 4 && n <= 4000) return n * 1000
-  }
-  for (const e of WINDOW_TABLE) if (e.match.test(modelId)) return e.window
-  return fallback
+/**
+ * 进程内记住的真实窗口（键 `providerId:model`）：服务商报「上下文超限」时从报错里解析出的上限
+ * （见 shared/context.ts 的 parseContextLimit）。只在比配置 / 内置值小时生效——中转常把上游窗口开小，
+ * 记住它，后续压缩就按真实上限来，不必每轮先撞一次超限。不落盘：换了中转或上游扩窗，重启即复原。
+ */
+const learnedWindows = new Map<string, number>()
+
+/** 记下报错里解析出的真实窗口；比当前生效值小（即确实改变了判定）时返回 true。 */
+export function rememberContextLimit(model: LimitModelRef, limit: number): boolean {
+  const before = contextWindowFor(model)
+  const key = `${model.providerId}:${model.model}`
+  learnedWindows.set(key, Math.min(limit, learnedWindows.get(key) ?? Infinity))
+  return limit < before
+}
+
+/** 某模型生效的上下文窗口：用户填写 > 自动（ID 自带 > 内置表 > 全局默认），再与进程内记住的真实上限取小。 */
+export function contextWindowFor(
+  model: LimitModelRef,
+  cfg: CompactionCfg = compactionConfig()
+): number {
+  const configured =
+    modelOverrides(model.providerId, model.model).contextWindow ??
+    autoContextWindow(model.model, cfg.defaultWindow)
+  const learned = learnedWindows.get(`${model.providerId}:${model.model}`)
+  return learned ? Math.min(configured, learned) : configured
+}
+
+/**
+ * 触发压缩的输入量：窗口 × 触发比例，且给输出留足余量——Anthropic 等要求「输入 + max_tokens」不超窗口，
+ * 小窗口配大输出上限（128K + 64K）时只按比例算会先撞超限。余量封顶半个窗口，防填错值时每轮都压。
+ */
+function triggerTokens(model: LimitModelRef, cfg: CompactionCfg): number {
+  const window = contextWindowFor(model, cfg)
+  const output =
+    modelOverrides(model.providerId, model.model).maxOutput ??
+    autoOutputBudget(model.adapter, model.model) ??
+    0
+  return Math.min(window * cfg.triggerRatio, window - Math.min(output, window / 2))
 }
 
 // ── token 估算（字符法；图片/文档按固定成本，规避 base64 数长度失真）───────────────
@@ -128,16 +152,15 @@ export function estimateTokens(messages: Message[]): number {
 /** 是否需要压缩：优先真实 usage.input，回退字符估算，与「窗口 × 触发比例」比较。 */
 export function needsCompaction(
   session: StoredSession,
-  modelId: string,
+  model: LimitModelRef,
   cfg: CompactionCfg = compactionConfig()
 ): boolean {
   if (!cfg.enabled) return false
-  const window = windowForModel(modelId, cfg.defaultWindow)
   const used =
     session.lastInputTokens && session.lastInputTokens > 0
       ? session.lastInputTokens
       : estimateTokens(session.messages)
-  return used >= window * cfg.triggerRatio
+  return used >= triggerTokens(model, cfg)
 }
 
 /**
@@ -148,16 +171,15 @@ export function needsCompaction(
  */
 export function needsCompactionMidTurn(
   messages: Message[],
-  modelId: string,
+  model: LimitModelRef,
   lastInput: number,
   lastInputAt: number,
   cfg: CompactionCfg = compactionConfig()
 ): boolean {
   if (!cfg.enabled) return false
-  const window = windowForModel(modelId, cfg.defaultWindow)
   const used =
     lastInput > 0 ? lastInput + estimateTokens(messages.slice(lastInputAt)) : estimateTokens(messages)
-  return used >= window * cfg.triggerRatio
+  return used >= triggerTokens(model, cfg)
 }
 
 // ── 边界选取 ──────────────────────────────────────────────────────────────────
@@ -259,12 +281,25 @@ function pickInTurnCut(messages: Message[], start: number, keepTokens: number): 
 }
 
 // ── 转录与摘要 ────────────────────────────────────────────────────────────────
-const MAX_TRANSCRIPT_CHARS = 48_000
+/**
+ * 转录总量上限：窗口的 1/4（摘要请求与主对话同一个模型，装得下），不低于原先的固定 48K 字符。
+ * 写死 48K 时，1M 窗口下待压段动辄几十万 token，摘要模型却只看得到最后一万多 token，前面全丢。
+ */
+const MIN_TRANSCRIPT_CHARS = 48_000
+const TRANSCRIPT_WINDOW_RATIO = 0.25
 const MAX_TOOL_RESULT_CHARS = 2_000
 const MAX_TOOL_ARGS_CHARS = 400
 
+function transcriptBudget(window: number): number {
+  return Math.max(MIN_TRANSCRIPT_CHARS, Math.round(window * TRANSCRIPT_WINDOW_RATIO * CHARS_PER_TOKEN))
+}
+
 /** 把待压段拍平成纯文本转录（丢 base64、截断超长工具结果、总量头部截断保留较近）。 */
-export function buildTranscript(messages: Message[], locale: string): string {
+export function buildTranscript(
+  messages: Message[],
+  locale: string,
+  maxChars = MIN_TRANSCRIPT_CHARS
+): string {
   const zh = locale !== 'en'
   const U = zh ? '用户' : 'User'
   const A = zh ? '助手' : 'Assistant'
@@ -300,9 +335,9 @@ export function buildTranscript(messages: Message[], locale: string): string {
   }
 
   let text = lines.join('\n')
-  if (text.length > MAX_TRANSCRIPT_CHARS) {
+  if (text.length > maxChars) {
     const omitted = zh ? '…（更早内容已省略）\n' : '…(earlier content omitted)\n'
-    text = omitted + text.slice(text.length - MAX_TRANSCRIPT_CHARS)
+    text = omitted + text.slice(text.length - maxChars)
   }
   return text
 }
@@ -506,7 +541,7 @@ export async function compactSession(args: {
   const { session, model, signal } = args
   const cfg = compactionConfig()
   const locale = String(getConfig().locale ?? 'zh-CN')
-  const window = windowForModel(model.model, cfg.defaultWindow)
+  const window = contextWindowFor(model, cfg)
   const keepTokens = Math.max(KEEP_TOKENS_MIN, Math.round(window * KEEP_RATIO))
   const msgs = session.messages
 
@@ -525,7 +560,7 @@ export async function compactSession(args: {
 
   const toSummarize = msgs.slice(0, boundary)
   const tail = msgs.slice(boundary)
-  const transcript = buildTranscript(toSummarize, locale)
+  const transcript = buildTranscript(toSummarize, locale, transcriptBudget(window))
 
   let summary = ''
   try {

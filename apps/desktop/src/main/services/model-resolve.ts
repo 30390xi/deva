@@ -1,5 +1,6 @@
 import { getConfig } from './config'
 import { isEffortLevel, type EffortLevel } from '../providers/types'
+import { CONTEXT_WINDOW_RANGE, MAX_OUTPUT_RANGE, validLimit } from '../../shared/context'
 
 /**
  * 模型引用解析（主进程）。子智能体可指定一个「已配置模型」运行，其引用格式与全局默认模型一致：
@@ -22,6 +23,8 @@ export interface ResolvedModel {
 interface StoredModelDef {
   id?: unknown
   enabled?: unknown
+  contextWindow?: unknown
+  maxOutput?: unknown
 }
 interface StoredProvider {
   id?: unknown
@@ -81,6 +84,34 @@ export function resolveModelRef(
  */
 export function resolveModelRefOrNull(ref: string | null | undefined): ResolvedModel | null {
   return resolveRefStrict(ref)
+}
+
+/** 用户在模型详情页填写的上下文窗口 / 输出上限；未填即「自动」（见 shared/context.ts）。 */
+export interface ModelOverrides {
+  contextWindow?: number
+  maxOutput?: number
+}
+
+/**
+ * 读某模型的用户覆盖值（`config.models.providers[].models[]` 的 contextWindow / maxOutput）。
+ * 按 providerId + 模型 ID 现查配置，主对话、子智能体、定时任务共用一处，改了即对下一次请求生效。
+ * 未填 / 非法 / 找不到 → 对应字段缺省（= 自动），永不抛错。
+ */
+export function modelOverrides(providerId: string, modelId: string): ModelOverrides {
+  try {
+    const models = (getConfig().models ?? {}) as { providers?: unknown }
+    const providers = Array.isArray(models.providers) ? (models.providers as StoredProvider[]) : []
+    const provider = providers.find((p) => p && p.id === providerId)
+    const list = Array.isArray(provider?.models) ? (provider.models as StoredModelDef[]) : []
+    const model = list.find((m) => m && m.id === modelId)
+    if (!model) return {}
+    const out: ModelOverrides = {}
+    if (validLimit(model.contextWindow, CONTEXT_WINDOW_RANGE)) out.contextWindow = model.contextWindow
+    if (validLimit(model.maxOutput, MAX_OUTPUT_RANGE)) out.maxOutput = model.maxOutput
+    return out
+  } catch {
+    return {}
+  }
 }
 
 /**

@@ -10,11 +10,15 @@
 export interface ModelDef {
   /** 传给 API 的模型 ID，如 gpt-4o */
   id: string
-  /** 展示名 */
+  /** 展示名（默认同 id；模型详情页可改，只影响界面显示，发给服务商的仍是 id） */
   name: string
   /** 能力标签，如 视觉 / 推理 / 长上下文 */
   tags?: string[]
   enabled: boolean
+  /** 上下文窗口（token）。缺省 = 自动（内置表，见 shared/context.ts），决定何时自动压缩。 */
+  contextWindow?: number
+  /** 每步输出上限（token，即 max_tokens）。缺省 = 自动（沿用引擎默认）。 */
+  maxOutput?: number
 }
 
 // 协议适配器。前三者为对话/写作模型（LLM，走 streamChat）；'jev' 为决策模型厂商（TypeSafe·Jev），

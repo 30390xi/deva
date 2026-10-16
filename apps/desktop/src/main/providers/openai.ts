@@ -124,6 +124,22 @@ function thinkingFields(e: EffortRequest | undefined): Record<string, unknown> {
   }
 }
 
+/**
+ * 输出上限的字段名：OpenAI 官方（含 Azure）的推理模型（o 系、GPT-5）只认 max_completion_tokens，
+ * 发 max_tokens 直接 400；官方的非推理模型也认它。其余兼容服务商（DeepSeek / 通义 / 中转等）仍用 max_tokens。
+ */
+function outputLimitField(baseURL: string): 'max_tokens' | 'max_completion_tokens' {
+  let host = ''
+  try {
+    host = new URL(baseURL).hostname.toLowerCase()
+  } catch {
+    return 'max_tokens'
+  }
+  return host === 'api.openai.com' || host.endsWith('.openai.azure.com')
+    ? 'max_completion_tokens'
+    : 'max_tokens'
+}
+
 function mapFinishReason(raw: string | null | undefined): StopReason {
   switch (raw) {
     case 'stop':
@@ -164,7 +180,7 @@ export async function* streamOpenAI(
       function: { name: t.name, description: t.description, parameters: t.inputSchema }
     })),
     temperature: req.temperature,
-    max_tokens: req.maxTokens,
+    [outputLimitField(cfg.baseURL)]: req.maxTokens,
     // 思考等级（已按模型能力表映射）。不认这些参数的服务商会 400，引擎记住后去掉重发。
     ...thinkingFields(req.effort),
     stream: true,

@@ -83,6 +83,7 @@ export type StopReason =
 // 思考等级的档位定义与模型能力表在主进程 / 渲染层共用模块里（见 shared/effort.ts）。
 export { isEffortLevel, type EffortLevel } from '../../shared/effort'
 import type { EffortRequest } from '../../shared/effort'
+import { parseContextLimit } from '../../shared/context'
 
 export interface GenerateRequest {
   model: string
@@ -128,6 +129,8 @@ export interface NormalizedError {
   message: string
   /** 服务端建议的重试等待（毫秒，来自 retry-after 头）；缺省由调用方按指数退避自定。 */
   retryAfterMs?: number
+  /** 上下文超限报错里写明的真实窗口（token，见 shared/context.ts 的 parseContextLimit）；认不出则缺省。 */
+  limit?: number
 }
 
 /** 统一流式事件——Agent 引擎只消费这套。 */
@@ -207,11 +210,11 @@ function parseRetryAfter(v: string | null | undefined): number | undefined {
 }
 
 /**
- * 请求被拒是否因为 max_tokens / max_output_tokens 超出该模型允许的输出上限（中转 / 老模型常见）。
- * 引擎据此把输出预算降回保守值重发，而不是整轮报错。
+ * 请求被拒是否因为 max_tokens / max_output_tokens / max_completion_tokens 超出该模型允许的输出上限
+ *（中转 / 老模型常见）。引擎据此把输出预算降回保守值重发，而不是整轮报错。
  */
 export function isOutputLimitRejection(status: number, body: string): boolean {
-  return status === 400 && /max_(output_)?tokens/i.test(body)
+  return status === 400 && /max_(output_|completion_)?tokens/i.test(body)
 }
 
 /**
@@ -232,11 +235,13 @@ export function httpError(
   retryAfter?: string | null,
   effortSent?: boolean
 ): NormalizedError {
+  // Anthropic 的「输入 + max_tokens 超出窗口」也落在这一类，其报错里写着真实窗口，一并带上。
   if (isOutputLimitRejection(status, body))
     return {
       kind: 'output_limit',
       retryable: false,
-      message: `请求的输出上限超出该模型允许范围（${status}）${bodyHint(body)}`
+      message: `请求的输出上限超出该模型允许范围（${status}）${bodyHint(body)}`,
+      limit: parseContextLimit(body)
     }
   if (status === 401 || status === 403)
     return { kind: 'auth', retryable: false, message: `鉴权失败（${status}）：请检查 API 密钥。` }
@@ -258,7 +263,8 @@ export function httpError(
     return {
       kind: 'context_length',
       retryable: false,
-      message: '对话长度已超出该模型的上下文上限，无法继续。请新建对话，或换用上下文更大的模型后重试。'
+      message: '对话长度已超出该模型的上下文上限，无法继续。请新建对话，或换用上下文更大的模型后重试。',
+      limit: parseContextLimit(body)
     }
   if (status >= 500)
     return {

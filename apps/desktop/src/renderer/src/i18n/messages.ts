@@ -231,6 +231,9 @@ const zhCN: MessageTree = {
       compacted: '较早的对话已压缩为摘要，以节省上下文。',
       compactNone: '当前对话较短，无需压缩。',
       compactFailed: '压缩失败，历史保持不变。',
+      contextLimitLearned:
+        '服务商返回该模型的实际上下文上限约为 {n}，此后将按此判断何时压缩。可在「设置 › 模型」中调整该模型的上下文窗口。',
+      outputLimitRejected: '服务商不接受所设的最大输出长度，已按 {n} 重发。可在「设置 › 模型」中调整。',
       restored: '已将代码回滚到较早的检查点，对话保留；下一条消息会告知模型这些文件已恢复。',
       aborted: '已停止本轮回复，以上为停止前已产出的内容。'
     },
@@ -605,7 +608,24 @@ const zhCN: MessageTree = {
     selectProvider: '供应商',
     presetCustomOption: '自定义（手动配置）',
     selectProviderHint: '选择官方供应商可一键套用地址、协议与模型清单',
-    applyPresetConfirm: '套用该供应商预置将替换当前模型清单，确定继续？'
+    applyPresetConfirm: '套用该供应商预置将替换当前模型清单，确定继续？',
+    editModel: '编辑模型',
+    backTo: '返回 {name}',
+    displayName: '显示名',
+    displayNameHint: '仅用于界面显示，请求服务商时仍使用模型 ID「{id}」。',
+    contextWindow: '上下文窗口',
+    contextWindowHint:
+      '对话上下文用到约 75% 时，会自动压缩较早的内容。中转或本地部署的实际上限可能小于官方值，请以实际为准。',
+    maxOutput: '最大输出长度',
+    maxOutputHint: '单次回复（含思考）的最大 token 数。服务商不接受该值时，会自动降为 8K 重发。',
+    providerDefault: '服务商默认',
+    limitAuto: '自动 · {v}',
+    limitCustom: '自定义',
+    limitPlaceholder: '输入 token 数，如 200000 或 200K',
+    limitInvalid: '请输入 {min} 至 {max} 之间的 token 数',
+    windowTooSmall: '上下文窗口须大于最大输出长度（{n}）',
+    outputTooLarge: '最大输出长度须小于上下文窗口（{n}）',
+    resetModel: '恢复默认'
   },
   status: {
     ready: '就绪',
@@ -1202,6 +1222,10 @@ const en: MessageTree = {
       compacted: 'Earlier conversation was compacted into a summary to save context.',
       compactNone: 'This conversation is still short — nothing to compact.',
       compactFailed: 'Compaction failed; history is unchanged.',
+      contextLimitLearned:
+        "The provider reports this model's actual context limit as about {n}; it will be used from now on to decide when to compact. You can adjust the context window under Settings › Models.",
+      outputLimitRejected:
+        'The provider rejected the configured max output length; retried with {n}. You can adjust it under Settings › Models.',
       restored:
         'Code was rolled back to an earlier checkpoint; the conversation is kept. Your next message will tell the model which files were restored.',
       aborted: 'Response stopped. Everything above was produced before stopping.'
@@ -1579,7 +1603,25 @@ const en: MessageTree = {
     selectProvider: 'Provider',
     presetCustomOption: 'Custom (configure manually)',
     selectProviderHint: 'Pick an official provider to auto-fill host, protocol and model list',
-    applyPresetConfirm: 'Applying this preset will replace the current model list. Continue?'
+    applyPresetConfirm: 'Applying this preset will replace the current model list. Continue?',
+    editModel: 'Edit model',
+    backTo: 'Back to {name}',
+    displayName: 'Display name',
+    displayNameHint: 'Shown in the app only. Requests still use the model ID "{id}".',
+    contextWindow: 'Context window',
+    contextWindowHint:
+      'Older messages are compacted automatically once about 75% of the context is used. Relays and local deployments may allow less than the official limit.',
+    maxOutput: 'Max output length',
+    maxOutputHint:
+      'Maximum tokens per reply, including thinking. If the provider rejects the value, the request is retried with 8K.',
+    providerDefault: 'provider default',
+    limitAuto: 'Auto · {v}',
+    limitCustom: 'Custom',
+    limitPlaceholder: 'Token count, e.g. 200000 or 200K',
+    limitInvalid: 'Enter a token count between {min} and {max}',
+    windowTooSmall: 'Must be larger than the max output length ({n})',
+    outputTooLarge: 'Must be smaller than the context window ({n})',
+    resetModel: 'Reset to defaults'
   },
   status: {
     ready: 'Ready',

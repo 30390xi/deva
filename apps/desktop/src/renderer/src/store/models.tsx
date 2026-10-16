@@ -29,6 +29,12 @@ interface ModelsContextValue {
     patch: Partial<Pick<Provider, 'name' | 'apiHost' | 'enabled' | 'adapter' | 'threshold'>>
   ) => void
   toggleModel: (providerId: string, modelId: string) => void
+  /** 改单个模型的显示名 / 上下文窗口 / 输出上限（模型详情页）；值为 undefined 即恢复自动。 */
+  updateModel: (
+    providerId: string,
+    modelId: string,
+    patch: Partial<Pick<ModelDef, 'name' | 'contextWindow' | 'maxOutput'>>
+  ) => void
   addModel: (providerId: string, id: string) => void
   /** 批量添加模型：去重并跳过已存在，一次落盘。用于从服务端清单多选添加。 */
   addModels: (providerId: string, ids: string[]) => void
@@ -185,6 +191,18 @@ export function ModelsProvider({ children }: { children: ReactNode }): React.JSX
         patchProvider(pid, (p) => ({
           ...p,
           models: p.models.map((mm) => (mm.id === mid ? { ...mm, enabled: !mm.enabled } : mm))
+        })),
+      updateModel: (pid, mid, patch) =>
+        patchProvider(pid, (p) => ({
+          ...p,
+          models: p.models.map((mm) => {
+            if (mm.id !== mid) return mm
+            const next = { ...mm, ...patch }
+            // 恢复自动：删键而不是留 undefined，落盘的配置里不残留空字段。
+            if (next.contextWindow === undefined) delete next.contextWindow
+            if (next.maxOutput === undefined) delete next.maxOutput
+            return next
+          })
         })),
       // 新增模型即启用：模型本身 enabled:true，并顺带启用所属服务商
       //（服务商被禁用则模型不可用），使刚添加的模型立即可选。

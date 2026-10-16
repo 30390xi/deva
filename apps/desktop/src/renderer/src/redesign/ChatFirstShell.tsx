@@ -4091,7 +4091,7 @@ function ModelPicker(): React.JSX.Element {
                       role="menuitemradio"
                       aria-checked={active}
                       className={`model-pick__item${active ? ' is-active' : ''}`}
-                      title={m.name}
+                      title={m.name === m.id ? m.id : `${m.name} · ${m.id}`}
                       onClick={() => {
                         // ① 记入本对话属性；② 记为「最近使用」，充当后续新对话未选时的默认。
                         setSessionModel(`${p.id}:${m.id}`)
