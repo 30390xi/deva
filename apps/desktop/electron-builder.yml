@@ -37,6 +37,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowElevation: true
+  # 自定义安装目录后会检测写入权限，见 build/installer.nsh（electron-builder 自动引入）
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
