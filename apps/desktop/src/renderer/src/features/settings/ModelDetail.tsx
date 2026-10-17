@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, RotateCcw } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronLeft, RotateCcw } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ModelDef, Provider } from '../../mock/models'
 import {
@@ -135,7 +135,10 @@ interface LimitFieldProps {
   onChange: (v: number | undefined) => void
 }
 
-/** 一项 token 上限：「自动 / 自定义」两档；自定义时可输入（支持 200K / 1M 写法）或点常用档位，失焦 / 回车保存。 */
+/**
+ * 一项 token 上限：单个组合输入框。留空即自动（占位文字显示自动值），可直接输入（支持 200K / 1M 写法），
+ * 或从右侧下拉选「自动」/ 常用档位；失焦 / 回车保存。展开与否都只占一行，不撑开页面。
+ */
 function LimitField({
   label,
   autoText,
@@ -148,14 +151,45 @@ function LimitField({
 }: LimitFieldProps): React.JSX.Element {
   const { t } = useI18n()
   const show = (n: number | undefined): string => (n === undefined ? '' : n.toLocaleString('en-US'))
-  const [custom, setCustom] = useState(value !== undefined)
   const [draft, setDraft] = useState(show(value))
   const [error, setError] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false)
+  // 下拉用 fixed 定位，不参与设置页滚动区的布局（否则靠底部的一项展开会撑出滚动条）；下方放不下时向上弹出。
+  const [menuPos, setMenuPos] = useState<React.CSSProperties | null>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPos(null)
+      return
+    }
+    const box = boxRef.current?.getBoundingClientRect()
+    const h = menuRef.current?.offsetHeight ?? 0
+    if (!box) return
+    const below = window.innerHeight - box.bottom
+    const up = below < h + 8 && box.top > below
+    setMenuPos({
+      left: box.left,
+      width: box.width,
+      ...(up ? { bottom: window.innerHeight - box.top + 4 } : { top: box.bottom + 4 })
+    })
+  }, [open])
+
+  // fixed 定位不随页面滚动，滚动或缩放窗口时直接收起。
+  useEffect(() => {
+    if (!open) return
+    const close = (): void => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
 
   // 保存后（或「恢复默认」）以存下的值为准：200k 之类的写法回显成规范数字。
   useEffect(() => {
-    setCustom(value !== undefined)
     setDraft(show(value))
     setError('')
   }, [value])
@@ -164,7 +198,7 @@ function LimitField({
     // 清空即回到自动。
     if (!raw.trim()) {
       setError('')
-      setCustom(false)
+      setDraft('')
       if (value !== undefined) onChange(undefined)
       return
     }
@@ -187,76 +221,88 @@ function LimitField({
     else setDraft(show(n))
   }
 
+  // 下拉项用 onMouseDown + preventDefault：先于 input blur，避免先按草稿保存一次再按所选项保存
+  const pick = (e: React.MouseEvent, n: number | undefined): void => {
+    e.preventDefault()
+    setOpen(false)
+    setDraft(show(n))
+    commit(n === undefined ? '' : String(n))
+  }
+
   return (
     <div className="field">
-      <label className="field__label">{label}</label>
-      <div className="segmented">
-        <button
-          type="button"
-          className={`segmented__item${custom ? '' : ' is-active'}`}
-          onClick={() => {
-            setCustom(false)
-            setError('')
-            setDraft('')
-            if (value !== undefined) onChange(undefined)
-          }}
-        >
-          {t('models.limitAuto').replace('{v}', autoText)}
-        </button>
-        <button
-          type="button"
-          className={`segmented__item${custom ? ' is-active' : ''}`}
-          onClick={() => {
-            if (custom) return
-            setCustom(true)
-            // 等输入框挂载后再聚焦
-            setTimeout(() => inputRef.current?.focus(), 0)
-          }}
-        >
-          {t('models.limitCustom')}
-        </button>
-      </div>
+      <label className="field__label">
+        {label}
+        {value !== undefined && <span className="model-limit__badge">{t('models.limitCustom')}</span>}
+      </label>
+      <div className="model-limit">
+        <div className="model-limit__box" ref={boxRef}>
+          <input
+            className="model-limit__input"
+            type="text"
+            inputMode="numeric"
+            value={draft}
+            placeholder={t('models.limitAuto').replace('{v}', autoText)}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              setError('')
+            }}
+            onBlur={(e) => commit(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              else if (e.key === 'Escape') setOpen(false)
+            }}
+          />
+          <span className="model-limit__unit">tokens</span>
+          <button
+            type="button"
+            className={`model-limit__toggle${open ? ' is-open' : ''}`}
+            tabIndex={-1}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setOpen((o) => !o)
+            }}
+          >
+            <ChevronDown size={14} />
+          </button>
+        </div>
 
-      {custom && (
-        <>
-          <div className="field__control model-limit__input">
-            <input
-              ref={inputRef}
-              className="input"
-              type="text"
-              inputMode="numeric"
-              value={draft}
-              placeholder={t('models.limitPlaceholder')}
-              onChange={(e) => {
-                setDraft(e.target.value)
-                setError('')
-              }}
-              onBlur={(e) => commit(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              }}
-            />
-            <span className="model-limit__unit">tokens</span>
-          </div>
-          <div className="model-limit__presets">
-            {presets.map((p) => (
+        {open && (
+          <>
+            <div className="model-pick__backdrop" onClick={() => setOpen(false)} />
+            <div
+              ref={menuRef}
+              className="model-limit__menu"
+              role="menu"
+              style={menuPos ?? { visibility: 'hidden' }}
+            >
               <button
-                key={p}
                 type="button"
-                className={`model-limit__preset${p === value ? ' is-active' : ''}`}
-                // onMouseDown 先于 input blur：避免先按草稿保存一次再按档位保存
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  setDraft(show(p))
-                  commit(String(p))
-                }}
+                className={`model-pick__item${value === undefined ? ' is-active' : ''}`}
+                onMouseDown={(e) => pick(e, undefined)}
               >
-                {formatTokens(p)}
+                <span className="model-pick__name">{t('models.limitAuto').replace('{v}', autoText)}</span>
+                {value === undefined && <Check size={14} className="model-pick__check" />}
               </button>
-            ))}
-          </div>
-        </>
-      )}
+              <div className="model-limit__sep" />
+              {presets.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`model-pick__item${p === value ? ' is-active' : ''}`}
+                  onMouseDown={(e) => pick(e, p)}
+                >
+                  <span className="model-pick__name">
+                    {formatTokens(p)}
+                    <span className="model-limit__exact">{show(p)}</span>
+                  </span>
+                  {p === value && <Check size={14} className="model-pick__check" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       {error && <div className="field__warn">{error}</div>}
       <p className="field__note">{note}</p>

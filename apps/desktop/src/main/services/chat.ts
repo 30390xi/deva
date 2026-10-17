@@ -83,6 +83,7 @@ import {
   type StoredNotice,
   type StoredSession
 } from './chat-store'
+import { trimHistoryImages } from './image-trim'
 import { ATTACH_TEXT_PREFIX, buildAttachmentPart } from './attachments'
 import {
   applyFiles,
@@ -2475,7 +2476,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           {
             model: model.model,
             system,
-            messages: history,
+            // 旧回合的工具图片换成文字说明、本回合超预算的较早图片也裁掉（只影响本次请求，历史不动）。
+            messages: trimHistoryImages(history),
             tools,
             signal: controller.signal,
             maxTokens: stepBudget,

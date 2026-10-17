@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, promises as fsp, readFileSync, rmSync, type Dire
 import { join } from 'path'
 import { getDevaHome } from './config'
 import { writeFileAtomic } from './chat-store'
+import { hydrateMessages, mediaReplacer } from './media-store'
 import type { Message, ToolSpec } from '../providers/types'
 
 /**
@@ -126,6 +127,7 @@ export function loadSubagent(sessionId: string, id: string): SubagentRecord | un
   try {
     const rec = JSON.parse(readFileSync(file, 'utf8')) as SubagentRecord
     if (!rec || !Array.isArray(rec.messages)) return undefined
+    hydrateMessages(rec.messages)
     records.set(key(sessionId, id), rec)
     return rec
   } catch {
@@ -150,7 +152,7 @@ export function saveSubagent(rec: SubagentRecord): void {
     try {
       const dir = sessionDir(rec.sessionId) as string
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-      writeFileAtomic(file, JSON.stringify(rec))
+      writeFileAtomic(file, JSON.stringify(rec, mediaReplacer))
     } catch (e) {
       console.warn('[subagents] 记录写入失败：', e)
     }

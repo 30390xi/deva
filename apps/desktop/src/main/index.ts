@@ -10,6 +10,7 @@ import { hasActiveTurns, registerChatIpc, settleActiveTurns } from './services/c
 import { listSessions } from './services/chat-store'
 import { sweepCheckpoints } from './services/checkpoints'
 import { sweepSubagents } from './services/subagent-store'
+import { sweepMedia } from './services/media-store'
 import { registerSkillsIpc } from './services/skills'
 import { ensureSeededPersonas, registerPersonasIpc } from './services/personas'
 import { registerProfileIpc } from './services/profile'
@@ -270,6 +271,8 @@ if (!app.requestSingleInstanceLock()) {
   void sweepSubagents(listSessions().map((m) => m.id)).catch((e) =>
     console.warn('[subagents] 清扫失败：', e)
   )
+  // 图片 / PDF blob 清扫：删掉已无任何对话或子智能体记录引用的文件
+  void sweepMedia().catch((e) => console.warn('[media] 清扫失败：', e))
 
   // 技能（Skills，全局 ~/.deva/skills/*/SKILL.md；渐进式披露，启用态入 config.json）
   registerSkillsIpc(() => mainWindow)

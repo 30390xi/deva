@@ -10,6 +10,7 @@ import {
 } from 'fs'
 import { join } from 'path'
 import { getDevaHome } from './config'
+import { hydrateMessages, mediaReplacer } from './media-store'
 import type { EffortLevel, Message } from '../providers/types'
 import type { CheckpointRec } from './checkpoints'
 import type { TodoEntry } from './todos'
@@ -319,6 +320,7 @@ function loadSessionFile(id: string): StoredSession | undefined {
   try {
     const s = JSON.parse(readFileSync(fileForId(id), 'utf8')) as StoredSession
     if (s && typeof s.id === 'string') {
+      if (Array.isArray(s.messages)) hydrateMessages(s.messages)
       sessionCache.set(id, s)
       return s
     }
@@ -336,7 +338,8 @@ export function save(id: string): void {
   const s = sessionCache.get(id)
   if (!s) return
   try {
-    writeFileAtomic(fileForId(id), JSON.stringify(s, null, 2))
+    // 图片 / PDF 的 base64 外置为 blob 引用（见 media-store.ts），对话文件只留哈希。
+    writeFileAtomic(fileForId(id), JSON.stringify(s, mediaReplacer, 2))
   } catch {
     /* 单条对话落盘失败静默，不影响内存态 */
     return
