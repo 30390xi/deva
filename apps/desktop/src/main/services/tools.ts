@@ -3,7 +3,7 @@ import { existsSync, promises as fs, type Dirent } from 'fs'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'path'
 import { resolveExecShell } from './exec-policy'
-import { upsertSkill } from './skills'
+import { skillsDir, upsertSkill } from './skills'
 import {
   deleteMemory,
   formatMemoryLine,
@@ -233,7 +233,7 @@ export const toolSpecs: ToolSpec[] = [
     name: 'create_skill',
     description:
       '创建并启用一个新的**单文件技能（Skill）**，写入用户的全局技能目录（绝对路径见系统提示词）。' +
-      '仅在用户明确想创建技能、且你已收集好要素并向用户复述确认后调用。' +
+      '仅在用户明确想创建技能时调用；需求不清时先澄清，需求清楚则无需先向用户复述草案、等待确认。' +
       '本工具只写一份 SKILL.md 正文；**多文件技能**（入口文档 + 参考文档/脚本）请改为直接在技能目录下建文件夹，' +
       '用 write_file 写入 SKILL.md（frontmatter 须含 name 与 description）与各子文件，或用 run_command 下载解压到该处。' +
       '创建后技能自动启用，用户可用 /技能名 触发。',
@@ -574,7 +574,7 @@ export function toolCategory(name: string): ToolCategory {
   if (READ_TOOLS.has(name)) return 'read'
   if (mcpToolNames.has(name)) return 'mcp'
   // 未知/幻觉工具名：一律按 mcp 走闸（ask），绝不再默认成 read 自动放行——关后门。
-  // 内置 create_skill 刻意不列入任何集合，天然落此默认分支 → 判 ask 过闸（与创建技能须经用户授权一致）。
+  // 内置 create_skill 不列入任何集合，落此默认分支：交互对话照常执行（不弹授权框），密封执行由 SEALED_FORBIDDEN 拒绝。
   return 'mcp'
 }
 
@@ -1602,7 +1602,7 @@ export async function executeTool(
         enabled: true
       })
       return {
-        content: `已创建并启用技能「${rec.name}」(id: ${rec.id})，用户可用 /${rec.name} 触发。`,
+        content: `已创建并启用技能「${rec.name}」(id: ${rec.id})，用户可用 /${rec.name} 触发。技能文件夹：${join(skillsDir(), rec.id)}（之后要补充脚本、参考文档等资源，直接写进这里）。`,
         summary: '已创建技能'
       }
     }
