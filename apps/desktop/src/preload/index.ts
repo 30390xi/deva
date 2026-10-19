@@ -169,8 +169,15 @@ export type DisplayBlock =
   /**
    * exit_plan 计划卡（重建）：计划正文从 tool_use 入参（input.plan）还原，decision 由主进程 plans 边车还原。
    * 恒为终态：'approve'/'keep' = 用户的决定；'cancelled' = 中止 / 未决。重建卡一律只读、不再可点。
+   * feedback = 继续完善时用户写的回复（未写则缺省）。
    */
-  | { kind: 'plan'; id: string; plan: string; decision: 'approve' | 'keep' | 'cancelled' }
+  | {
+      kind: 'plan'
+      id: string
+      plan: string
+      decision: 'approve' | 'keep' | 'ignore' | 'cancelled'
+      feedback?: string
+    }
   /** 已完成的待办清单卡（重建）：画在令清单全部完成的那次 todo_write 处；其余 todo_write 不画。 */
   | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 
@@ -266,7 +273,9 @@ export interface AskResponse {
 /** 用户对 exit_plan 计划审阅的决定：approve=批准并执行 / keep=继续完善。 */
 export interface PlanResponse {
   key: string
-  decision: 'approve' | 'keep'
+  decision: 'approve' | 'keep' | 'ignore'
+  /** 选「继续完善」时在卡上直接写的回复；缺省 / 空 = 未写。 */
+  feedback?: string
 }
 
 /** 待办清单的一项（与 services/todos.ts 对齐）。 */
@@ -699,7 +708,8 @@ export type ChatStreamEvent =
       key: string
       kind: 'ask' | 'plan' | 'mount'
       answers?: string[] | null
-      decision?: 'approve' | 'keep' | null
+      decision?: 'approve' | 'keep' | 'ignore' | null
+      feedback?: string
       path?: string | null
     }
   /** 角色名片 / 定时任务名片已决议（可能来自手机端）；不属于任何回合，turnId 为空串。 */

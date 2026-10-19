@@ -1160,7 +1160,11 @@ async function handleAction(a: InboundAction): Promise<ActionResult> {
     }
     case 'plan':
       return rt.decidePlan({ key: v.key, decision: v.d })
-        ? { ok: true, message: v.d === 'approve' ? '已批准，开始执行' : '好的，继续完善计划' }
+        ? {
+            ok: true,
+            message:
+              v.d === 'approve' ? '已批准，开始执行' : v.d === 'ignore' ? '已忽略这份计划' : '好的，继续完善计划'
+          }
         : { ok: false, message: '这份计划已经结束了。' }
     case 'mount':
       return rt.answerMount({ key: v.key, path: null })

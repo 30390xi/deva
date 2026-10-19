@@ -636,15 +636,18 @@ function promptRendered(v: Exclude<PromptView, { kind: 'ask' }>, act: (v: Action
           ? head('计划已批准', v.sessionTitle, '✅')
           : v.state === 'keep'
             ? head('继续完善计划', v.sessionTitle, '✏️')
-            : head('计划审阅已结束', v.sessionTitle, '⏹')
+            : v.state === 'ignore'
+              ? head('计划已忽略', v.sessionTitle, '🚫')
+              : head('计划审阅已结束', v.sessionTitle, '⏹')
       return { html: `${t}\n\n${fold(esc(clip(v.plan, 2500)))}` }
     }
     return {
       html: `${head('请审阅计划', v.sessionTitle, '📋')}\n\n${mdToHtml(clip(v.plan, 3000))}`,
       keyboard: [
         [
-          btn('✅ 批准并执行', { k: 'plan', key: v.key, d: 'approve' }),
-          btn('✏️ 继续完善', { k: 'plan', key: v.key, d: 'keep' })
+          btn('✏️ 继续完善', { k: 'plan', key: v.key, d: 'keep' }),
+          btn('🚫 忽略', { k: 'plan', key: v.key, d: 'ignore' }),
+          btn('✅ 批准并执行', { k: 'plan', key: v.key, d: 'approve' })
         ]
       ]
     }

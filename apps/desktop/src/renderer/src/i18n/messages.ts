@@ -416,11 +416,17 @@ const zhCN: MessageTree = {
       cardTitle: '待批准的计划',
       approve: '批准并执行',
       keep: '继续完善',
+      ignore: '忽略',
       approved: '已批准',
       kept: '继续完善',
+      ignored: '已忽略',
       cancelled: '已取消',
       expand: '展开计划',
-      collapse: '收起计划'
+      collapse: '收起计划',
+      feedbackPlaceholder: '输入修改意见或问题，回车提交，Shift+回车换行',
+      sendFeedback: '提交',
+      back: '返回',
+      feedbackLabel: '回复'
     },
     mount: {
       cardTitle: '需要挂载工作区',
@@ -1403,11 +1409,17 @@ const en: MessageTree = {
       cardTitle: 'Plan for review',
       approve: 'Approve & run',
       keep: 'Keep planning',
+      ignore: 'Ignore',
       approved: 'Approved',
       kept: 'Kept planning',
+      ignored: 'Ignored',
       cancelled: 'Cancelled',
       expand: 'Show plan',
-      collapse: 'Hide plan'
+      collapse: 'Hide plan',
+      feedbackPlaceholder: 'Enter changes or questions. Enter to submit, Shift+Enter for a new line',
+      sendFeedback: 'Submit',
+      back: 'Back',
+      feedbackLabel: 'Reply'
     },
     mount: {
       cardTitle: 'Workspace needed',

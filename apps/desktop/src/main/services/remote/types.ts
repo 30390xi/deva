@@ -51,7 +51,7 @@ export interface InboundAction {
 
 export type ActionValue =
   | { k: 'ask'; key: string }
-  | { k: 'plan'; key: string; d: 'approve' | 'keep' }
+  | { k: 'plan'; key: string; d: 'approve' | 'keep' | 'ignore' }
   | { k: 'mount'; key: string }
   | { k: 'use'; sid: string }
   /** 名片决议：带 sid + 工具调用 id，处理时从会话历史里取草稿（无状态，重启后按钮照样有效）。 */
@@ -135,7 +135,7 @@ export type PromptView =
       key: string
       sessionTitle: string
       plan: string
-      state: 'open' | 'approve' | 'keep' | 'cancelled'
+      state: 'open' | 'approve' | 'keep' | 'ignore' | 'cancelled'
     }
   | {
       kind: 'mount'

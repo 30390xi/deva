@@ -2718,6 +2718,56 @@ textarea {
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
+/* 右侧按钮组（忽略 / 批准并执行、提交）：左侧只留「继续完善 / 返回」。 */
+.msg__plan-actions-end {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+/* 「继续完善」展开的回复输入框：观感同问答卡的自由输入框，多行可拖高。 */
+.msg__plan-refine {
+  margin-top: var(--space-3);
+}
+.msg__plan-refine .msg__plan-actions {
+  margin-top: var(--space-2);
+}
+.msg__plan-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+.msg__plan-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* 已决态回显用户写的回复：收起时也常显，左侧竖线标出是用户原话。 */
+.msg__plan-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--border-strong);
+  font-size: 13px;
+}
+.msg__plan-feedback-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.msg__plan-feedback-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* 挂载工作区请求卡：与计划卡同构（accent 观感、is-decided 淡化），正文是纯文本说明而非 Markdown。 */
 .msg__mount {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));

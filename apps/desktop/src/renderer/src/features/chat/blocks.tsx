@@ -302,8 +302,8 @@ export function BlockView({
   block: ChatBlock
   thinkingDone: boolean
   onAsk: (key: string, answers: string[]) => void
-  /** 回应 exit_plan 计划审阅（批准并执行 / 继续完善）。缺省 → 计划卡只读展示。 */
-  onPlan?: (key: string, decision: 'approve' | 'keep') => void
+  /** 回应 exit_plan 计划审阅（批准并执行 / 继续完善（可附回复）/ 忽略）。缺省 → 计划卡只读展示。 */
+  onPlan?: (key: string, decision: 'approve' | 'keep' | 'ignore', feedback?: string) => void
   /** 回应「请求挂载工作区」（path=已选目录 / null=暂不挂载）。缺省 → 卡片只读展示。 */
   onMountReq?: (key: string, path: string | null) => void
   /** 点角色名片 → 打开预填的 PersonaEditor（缺省 → 名片只读展示）。 */
@@ -478,23 +478,31 @@ function MountRequestCard({
 }
 
 /**
- * 计划审阅卡（exit_plan）：展示模型提交的待批准计划（Markdown 正文），提供「批准并执行 / 继续完善」。
+ * 计划审阅卡（exit_plan）：展示模型提交的待批准计划（Markdown 正文），左侧「继续完善」，右侧「忽略 / 批准并执行」。
  * 未决态可交互；decided 为终态、只读展示（重开对话按 plans 边车复原）。其中 cancelled = 这次审阅已随
  * 回合结束（中断 / 历史回填），主进程已无人接应——只展示不给按钮，免得留下点不动的「僵尸卡」。
  * onPlan 缺省 → 只读。
  * 已决态默认**收起**正文（只留标题行 + 计划首行摘要），点标题行展开/收起，免得长计划在批准后继续占满对话。
+ * 「继续完善」在卡内展开输入框，回复（修改意见或提问）须非空才能提交，随决定一起回灌、模型当轮回应；
+ * 回复在已决态常显（收起时也显示）。「忽略」= 放弃这份计划，模型不执行也不重提。
  */
 function PlanReviewCard({
   block,
   onPlan
 }: {
   block: Extract<ChatBlock, { kind: 'plan' }>
-  onPlan?: (key: string, decision: 'approve' | 'keep') => void
+  onPlan?: (key: string, decision: 'approve' | 'keep' | 'ignore', feedback?: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const decided = block.decided
   const [open, setOpen] = useState(false)
+  const [refining, setRefining] = useState(false)
+  const [feedback, setFeedback] = useState('')
   const showBody = !decided || open
+  const reply = feedback.trim()
+  const submitKeep = (): void => {
+    if (reply) onPlan?.(block.key, 'keep', reply)
+  }
   // 收起态摘要：计划正文首个非空行，剥掉 Markdown 标题 / 列表 / 强调标记。
   const summary = decided
     ? (block.plan.split('\n').find((l) => l.trim()) ?? '')
@@ -540,7 +548,9 @@ function PlanReviewCard({
               ? t('chat.plan.approved')
               : decided === 'keep'
                 ? t('chat.plan.kept')
-                : t('chat.plan.cancelled')}
+                : decided === 'ignore'
+                  ? t('chat.plan.ignored')
+                  : t('chat.plan.cancelled')}
           </span>
         )}
       </div>
@@ -549,19 +559,64 @@ function PlanReviewCard({
           <Markdown text={block.plan} />
         </div>
       )}
-      {!decided && onPlan && (
+      {block.feedback && (
+        <div className="msg__plan-feedback">
+          <span className="msg__plan-feedback-label">{t('chat.plan.feedbackLabel')}</span>
+          <span className="msg__plan-feedback-text">{block.feedback}</span>
+        </div>
+      )}
+      {!decided && onPlan && refining && (
+        <div className="msg__plan-refine">
+          <textarea
+            className="msg__plan-input"
+            rows={3}
+            value={feedback}
+            placeholder={t('chat.plan.feedbackPlaceholder')}
+            autoFocus
+            onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={(e) => {
+              // 同输入框：回车提交、Shift / Ctrl / Alt+回车换行、输入法组字中不拦；空回复不提交。
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+              if (e.shiftKey || e.ctrlKey || e.altKey) return
+              e.preventDefault()
+              submitKeep()
+            }}
+          />
+          <div className="msg__plan-actions">
+            <button type="button" className="btn btn--sm" onClick={() => setRefining(false)}>
+              {t('chat.plan.back')}
+            </button>
+            <div className="msg__plan-actions-end">
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={!reply}
+                onClick={submitKeep}
+              >
+                {t('chat.plan.sendFeedback')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {!decided && onPlan && !refining && (
         <div className="msg__plan-actions">
-          <button
-            type="button"
-            className="btn btn--sm btn--primary"
-            onClick={() => onPlan(block.key, 'approve')}
-          >
-            <ClipboardCheck size={14} />
-            {t('chat.plan.approve')}
-          </button>
-          <button type="button" className="btn btn--sm" onClick={() => onPlan(block.key, 'keep')}>
+          <button type="button" className="btn btn--sm" onClick={() => setRefining(true)}>
             {t('chat.plan.keep')}
           </button>
+          <div className="msg__plan-actions-end">
+            <button type="button" className="btn btn--sm" onClick={() => onPlan(block.key, 'ignore')}>
+              {t('chat.plan.ignore')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--primary"
+              onClick={() => onPlan(block.key, 'approve')}
+            >
+              <ClipboardCheck size={14} />
+              {t('chat.plan.approve')}
+            </button>
+          </div>
         </div>
       )}
     </div>

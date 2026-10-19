@@ -2899,7 +2899,7 @@ function Conversation({
   onStop: () => void
   onMount: (path: string | null) => void
   onAsk: (key: string, answers: string[]) => void
-  onPlan: (key: string, decision: 'approve' | 'keep') => void
+  onPlan: (key: string, decision: 'approve' | 'keep' | 'ignore', feedback?: string) => void
   /** 回应「请求挂载工作区」（path=用户选定目录 / null=暂不挂载）。 */
   onMountReq: (key: string, path: string | null) => void
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
@@ -3516,7 +3516,7 @@ function ConvMessage({
   /** 该消息所属的对话轮下标（0 基）；标注在根节点上，供右键菜单定位「删除此轮」。前言/未知为 undefined。 */
   dataTurn?: number
   onAsk: (key: string, answers: string[]) => void
-  onPlan: (key: string, decision: 'approve' | 'keep') => void
+  onPlan: (key: string, decision: 'approve' | 'keep' | 'ignore', feedback?: string) => void
   onMountReq: (key: string, path: string | null) => void
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   onOpenAutotask: (taskId: string) => void

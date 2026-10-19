@@ -123,11 +123,12 @@ export interface StoredSession {
   /**
    * 计划模式（plan mode）exit_plan 的决定态边车，按 toolUseId 记录用户对该计划的决定。
    * 计划正文可从 tool_use 入参（input.plan）重解析还原，故此边车**只需记决定态**（同 proposals）：
-   * 'approve'=已批准（该回合已退出计划模式转执行）/'keep'=用户选择继续完善/null=中止未决。
+   * 'approve'=已批准（该回合已退出计划模式转执行）/'keep'=用户选择继续完善/'ignore'=用户忽略该计划/
+   * null=中止未决。feedback = 继续完善时用户在卡上写的回复（未写则缺省）。
    * 缺省即未决（pending）。按 toolUseId 记录，压缩重排 messages 时无需调整。
    * 见 chat.ts:toDisplayMessages / runTurn 的 onPlanDecided。
    */
-  plans?: Record<string, { decision: 'approve' | 'keep' | null }>
+  plans?: Record<string, { decision: 'approve' | 'keep' | 'ignore' | null; feedback?: string }>
   /**
    * 定时任务确认名片（create_task 提议）的终态边车，按 toolUseId 记录用户对该名片的决定。
    * 名片本体随 Message[] 天然存活（tool_use 入参含 title/kind/prompt/schedule），但其「已创建 / 已忽略」

@@ -428,7 +428,9 @@ function promptCard(v: PromptView): Card {
           ? { title: '计划已批准', template: 'green' as const }
           : v.state === 'keep'
             ? { title: '继续完善计划', template: 'blue' as const }
-            : { title: '计划审阅已结束', template: 'grey' as const }
+            : v.state === 'ignore'
+              ? { title: '计划已忽略', template: 'grey' as const }
+              : { title: '计划审阅已结束', template: 'grey' as const }
       return card(
         [
           {
@@ -446,8 +448,9 @@ function promptCard(v: PromptView): Card {
         md(clip(v.plan, 6000)),
         { tag: 'hr' },
         buttonRow([
-          button('批准并执行', { k: 'plan', key: v.key, d: 'approve' }, 'primary'),
-          button('继续完善', { k: 'plan', key: v.key, d: 'keep' })
+          button('继续完善', { k: 'plan', key: v.key, d: 'keep' }),
+          button('忽略', { k: 'plan', key: v.key, d: 'ignore' }),
+          button('批准并执行', { k: 'plan', key: v.key, d: 'approve' }, 'primary')
         ])
       ],
       { title: '请审阅计划', subtitle, template: 'orange' }
