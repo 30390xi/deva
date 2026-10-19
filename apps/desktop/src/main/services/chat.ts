@@ -48,7 +48,7 @@ import {
   subagentIdFor,
   type SubagentRecord
 } from './subagent-store'
-import { enabledPersonas, getPersona } from './personas'
+import { DEFAULT_PERSONA_ID, enabledPersonas, getPersona } from './personas'
 import {
   modelOverrides,
   resolveDefaultModel,
@@ -3407,8 +3407,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     pendingUndo.delete(sessionId)
     // 密封任务无固定工作目录：相对路径回落进程 cwd，文件操作应用绝对路径。读写不设路径限制。
     const effectiveRoot: string | null = null
+    // 角色：信封未指定或角色已删 → 默认角色 Deva（删角色时任务已改绑 Deva，这里兜旧数据与手动删文件）。
+    const persona =
+      (auth.personaId ? getPersona(auth.personaId) : null) ?? getPersona(DEFAULT_PERSONA_ID)
     const session = ensureSession(sessionId, {
-      personaId: auth.personaId ?? undefined,
+      personaId: persona?.id ?? auth.personaId ?? undefined,
       model: auth.modelRef ?? undefined
     })
     // 首次触发派生标题（沿用任务标题；缺失则从 prompt 派生）。
@@ -3427,7 +3430,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     }
 
     const ctx: ToolContext = { workspaceRoot: effectiveRoot, signal: controller.signal }
-    const persona = auth.personaId ? getPersona(auth.personaId) : null
     const personas =
       persona && persona.prompt.trim() ? [{ name: persona.name, prompt: persona.prompt }] : []
 

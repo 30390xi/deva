@@ -400,6 +400,20 @@ export function ensureSession(
   return s
 }
 
+/**
+ * 改绑对话角色：仅当当前绑定的是 `from` 时改为 `to`，返回是否改动。常规对话的角色一次性绑定
+ * （见 ensureSession）；这里只供「绑定的角色被删、由别的角色接管」时用。不动 updatedAt，列表顺序不变。
+ */
+export function rebindSessionPersona(id: string, from: string, to: string): boolean {
+  // 先查索引：不相干的对话不必读整份历史。
+  if (ensureIndex().get(id)?.personaId !== from) return false
+  const s = loadSessionFile(id)
+  if (!s || s.personaId !== from) return false
+  s.personaId = to
+  save(id)
+  return true
+}
+
 /** 删除某对话：清缓存 + 索引 + 磁盘文件。 */
 export function deleteSession(id: string): void {
   sessionCache.delete(id)

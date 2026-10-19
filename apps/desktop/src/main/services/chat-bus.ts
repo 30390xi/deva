@@ -58,7 +58,7 @@ export function onAppNotice(listener: (n: AppNotice) => void): () => void {
 }
 
 /**
- * 对话清单在回合之外变了（手机上 /new 建出的空对话）。经回合新建的不必发：首轮 turn_start 已会让渲染层刷新列表。
+ * 对话清单在回合之外变了（手机上 /new 建出的空对话、删角色时定时任务对话改挂 Deva）。经回合新建的不必发：首轮 turn_start 已会让渲染层刷新列表。
  */
 export function publishSessionsChanged(): void {
   bus.emit('sessions')

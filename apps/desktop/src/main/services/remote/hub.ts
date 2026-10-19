@@ -8,7 +8,13 @@ import {
 } from '../chat-bus'
 import { getChatRuntime, type ChatStreamEvent } from '../chat'
 import { ensureSession, getSession, listSessions, save as saveSession } from '../chat-store'
-import { getPersona, listPersonas, upsertPersona, type PersonaRecord } from '../personas'
+import {
+  DEFAULT_PERSONA_ID,
+  getPersona,
+  listPersonas,
+  upsertPersona,
+  type PersonaRecord
+} from '../personas'
 import { resolveDefaultEffort, resolveDefaultModel, resolveModelRefOrNull } from '../model-resolve'
 import { previewSchedule } from '../tasks'
 import type { TaskCreateInput } from '../tasks-types'
@@ -983,9 +989,6 @@ async function runCommand(chat: ChatAddress, name: string, arg: string): Promise
       return false
   }
 }
-
-/** 默认角色 Deva 的固定 id（种子角色，与桌面端默认身份一致）；按 id 绑定，用户改名不受影响。 */
-const DEFAULT_PERSONA_ID = 'general'
 
 /**
  * 按名称 / id 找本机器人能用的角色。未指定角色（空名）固定用默认角色 Deva，不挑列表里的第一个——

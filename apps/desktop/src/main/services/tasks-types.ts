@@ -37,7 +37,7 @@ export interface TaskSchedule {
  * 授权信封：创建时议定「以何身份/模型运行」。工具一律可用、读写与命令执行不设限。
  */
 export interface TaskAuthorization {
-  /** 绑定人格 id；null → 无人格（同 runTurn 无 persona 时行为）。人格被删则不注入人格提示。 */
+  /** 绑定人格 id；null 或人格已删 → 由默认角色 Deva 执行（删角色时任务即改绑 Deva，见 reassignTaskPersona）。 */
   personaId: string | null
   /** 模型引用 `"providerId:modelId"`；null → 全局默认（resolveDefaultModel）。 */
   modelRef: string | null

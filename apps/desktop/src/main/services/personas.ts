@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { randomBytes } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -9,6 +10,7 @@ import {
 import { getConfig, getDevaHome, setConfig } from './config'
 import { DEFAULT_PERSONAS } from './default-personas'
 import { fmScalar, fmString, parseFrontmatter } from './frontmatter'
+import { reassignTaskPersona } from './tasks'
 
 /**
  * Agent 提示词（Personas）服务：发现 / 解析 / 读写 `~/.deva/personas/<id>.md`（全局，与项目无关）。
@@ -32,6 +34,12 @@ import { fmScalar, fmString, parseFrontmatter } from './frontmatter'
  * 安全：persona 配置由**主进程直读**。注入时以固定前言框定为「用户自定义附加指令，在不违反安全与工具使用原则的前提下遵循」——persona
  * 绝不能借此关闭「切勿用文字征求授权」等安全/工具铁律。
  */
+
+/**
+ * 默认角色 Deva 的固定 id（种子角色，见 deva-personas.ts；界面不允许删除）。
+ * 未绑定角色、或绑定的角色已被删除时一律回落到它；按 id 绑定，用户改名不受影响。
+ */
+export const DEFAULT_PERSONA_ID = 'general'
 
 export interface PersonaRecord {
   /** 文件名（去 .md），稳定身份（选择/启用态键）。 */
@@ -137,7 +145,11 @@ function isSafeId(id: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(id) && id !== '.' && id !== '..'
 }
 
-/** 据显示名生成安全、唯一的文件名 id。 */
+/**
+ * 据显示名生成安全、唯一的文件名 id：slug + 随机后缀，**绝不复用已删角色的 id**。
+ * 定时任务、对话、IM 回复范围都按 id 引用角色；若只在撞名时加序号，中文名全被 slug 成同一个 `persona`，
+ * 删掉一个角色后新建就会拿回同一个 id，旧引用便悄悄指向了新角色。
+ */
 function makeId(name: string): string {
   const slug = name
     .trim()
@@ -146,11 +158,10 @@ function makeId(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40)
   const base = slug || 'persona'
-  let id = base
-  let n = 2
-  while (existsSync(personaFile(id))) {
-    id = `${base}-${n++}`
-  }
+  let id: string
+  do {
+    id = `${base}-${randomBytes(4).toString('hex')}`
+  } while (existsSync(personaFile(id)))
   return id
 }
 
@@ -289,9 +300,10 @@ export function deletePersona(id: string): void {
   } catch {
     /* 忽略删除失败 */
   }
-  // 必须连自定义头像一起删：makeId 只查 `<id>.md` 是否存在来判重，且中文名全被 slug 成同一个
-  // `persona`，故删掉一个角色后新建极易**复用同一个 id**——遗留的图会平白挂到新角色脸上。
+  // 连自定义头像一起删：不留孤儿文件（旧版 makeId 会复用已删角色的 id，遗留的图曾挂到新角色脸上）。
   clearAvatarImage(id)
+  // 绑定该角色的定时任务改由默认角色 Deva 执行（连同其独占对话），任务照常运行。
+  reassignTaskPersona(id, DEFAULT_PERSONA_ID)
   const map = enabledMap()
   if (id in map) {
     delete map[id]

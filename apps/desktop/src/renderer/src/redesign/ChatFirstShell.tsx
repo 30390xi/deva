@@ -312,6 +312,7 @@ export function ChatFirstShell(): React.JSX.Element {
     stopSubagent
   } = useChat()
   const { personas, remove, reorderPersonas } = useExtensions()
+  const { tasks } = useTasks()
   const { t, locale } = useI18n()
   const dialog = useDialog()
 
@@ -488,7 +489,11 @@ export function ChatFirstShell(): React.JSX.Element {
     // 系统默认角色不可删除（UI 侧菜单项已禁用，此处再兜一道，防其他触发路径）。
     if (id === DEFAULT_PERSONA_ID) return
     // 该角色名下已落库的对话（草稿未落库不计），删角色时一并清除；数量用于提示影响面。
-    const relatedIds = sessions.filter((s) => s.personaId === id).map((s) => s.id)
+    // 定时任务的独占对话不在此列：任务改由 Deva 执行，对话随之改挂 Deva（主进程删角色时处理）。
+    const taskSessionIds = new Set(tasks.map((x) => x.sessionId))
+    const relatedIds = sessions
+      .filter((s) => s.personaId === id && !taskSessionIds.has(s.id))
+      .map((s) => s.id)
     const shown = clipName(name)
     const heading = locale === 'en' ? `Delete persona “${shown}”?` : `删除角色 ${shown} ？`
     // 有关联对话 → 提示「同时删除 N 个对话」；无 → 用不涉及对话的简短文案。
@@ -2162,10 +2167,11 @@ function TasksPane({
     [tasks, editTaskId]
   )
 
-  // 人格名（未指定 / 引用已删则回落中性占位——定时任务已不设「跟随当前对话」）。
+  // 人格名：未指定 / 引用已删 → 显示默认角色 Deva（执行时同样回落 Deva，见主进程 runScheduledTurn）。
   const personaName = (id: string | null): string => {
-    if (!id) return t('tasks.personaNone')
-    return personas.find((p) => p.id === id)?.name ?? t('tasks.personaNone')
+    const p =
+      personas.find((x) => x.id === id) ?? personas.find((x) => x.id === DEFAULT_PERSONA_ID)
+    return p?.name ?? t('tasks.personaNone')
   }
   // 模型完整名（服务商 · 模型）；空 / 已删则回落默认标签。
   const modelLabel = (ref: string | null): string => {

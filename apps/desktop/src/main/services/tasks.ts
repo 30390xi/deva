@@ -3,6 +3,8 @@ import { readFileSync, writeFileSync, renameSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { getDevaHome } from './config'
+import { publishSessionsChanged } from './chat-bus'
+import { rebindSessionPersona } from './chat-store'
 import { nextRun, parseCron, isValidTimeZone, describeSchedule, parseWallIso } from './schedule'
 import {
   ERROR_PAUSE_THRESHOLD,
@@ -208,6 +210,27 @@ export function updateTask(input: TaskUpdateInput): TaskRecord | null {
 export function deleteTask(id: string): void {
   ensureLoaded()
   if (cache.delete(id)) persist()
+}
+
+/**
+ * 角色被删：绑定它的任务改由 `to` 执行（personas.ts deletePersona 调用）。任务的独占对话一并改挂——
+ * 仍挂着被删角色的对话（含任务改过角色、对话还停在旧角色的）改挂任务当前的角色。
+ */
+export function reassignTaskPersona(from: string, to: string): void {
+  ensureLoaded()
+  if (from === to) return
+  let changed = false
+  let rebound = false
+  for (const t of cache.values()) {
+    if (t.auth.personaId === from) {
+      t.auth = { ...t.auth, personaId: to }
+      t.updatedAt = Date.now()
+      changed = true
+    }
+    if (rebindSessionPersona(t.sessionId, from, t.auth.personaId ?? to)) rebound = true
+  }
+  if (changed) persist()
+  if (rebound) publishSessionsChanged()
 }
 
 /**
