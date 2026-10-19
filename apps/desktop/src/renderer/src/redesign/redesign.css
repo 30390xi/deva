@@ -1755,7 +1755,42 @@ body.cf-resizing-y * {
   font-size: 13.5px;
   line-height: 1.5;
   min-height: 44px;
-  overflow-y: auto; /* 对话输入框固定高（内联 height），内容多了框内滚动 */
+  overflow-y: auto;
+}
+/* 对话输入框：Lexical 接管的 contentEditable，排版同上方 textarea（含其默认 2px 内边距）；
+   固定高（内联 height），内容多了框内滚动。 */
+.cf-draft {
+  position: relative; /* 占位提示的定位锚 */
+  min-height: 44px;
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.cf-draft__input {
+  height: 100%;
+  padding: 2px;
+  overflow-y: auto;
+  outline: none;
+}
+.cf-draft__input p {
+  margin: 0;
+}
+.cf-draft__ph {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  pointer-events: none;
+  user-select: none;
+}
+/* 开头会生效的 /指令（已启用技能、整条只有它的 /compact /rewind）：只上色，不加底色。 */
+.cf-slash-token {
+  color: var(--accent);
 }
 .cf-box__bar {
   display: flex;

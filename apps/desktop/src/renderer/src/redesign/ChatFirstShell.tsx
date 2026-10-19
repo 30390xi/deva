@@ -51,6 +51,7 @@ import {
   X
 } from 'lucide-react'
 import { BotsPane } from './BotsPane'
+import { useComposerEditor, type ComposerKey } from './composer-editor'
 import { UpdateSection } from './UpdateSection'
 // 关于页的应用图标：直接用安装包图标的源文件，图形只维护一份
 import devaIcon from '../../../../build/icon.svg'
@@ -3701,7 +3702,6 @@ function Composer({
   const { skills } = useExtensions()
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<Picked[]>([])
-  const taRef = useRef<HTMLTextAreaElement>(null)
   // 输入框高度：固定高、不随内容长高，内容多了框内滚动；只能靠顶边手柄拖动调整。
   // 与侧栏同理，存用户意图值、渲染时按窗口高再夹取。
   const viewport = useViewport()
@@ -3723,15 +3723,8 @@ function Composer({
   // nonce 变化触发一次；消费后立即回调置空（父层 prefill→null），guard 防重入与重挂载复活。
   useEffect(() => {
     if (!prefill) return
-    setInput(prefill.text)
+    composer.setText(prefill.text, true)
     onPrefillConsumed()
-    requestAnimationFrame(() => {
-      const el = taRef.current
-      if (!el) return
-      el.focus()
-      const end = el.value.length
-      el.setSelectionRange(end, end)
-    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill?.nonce])
 
@@ -3784,16 +3777,7 @@ function Composer({
   }, [slashCur, slashOpen])
 
   /** 采纳候选：写回 `/name `（尾随空格便于接着补充说明，发送前会被 trim），光标留在末尾。 */
-  const applySlash = (c: SlashCommand): void => {
-    const next = `/${c.name} `
-    setInput(next)
-    requestAnimationFrame(() => {
-      const el = taRef.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(next.length, next.length)
-    })
-  }
+  const applySlash = (c: SlashCommand): void => composer.setText(`/${c.name} `, true)
 
   const name = owner?.name ?? t('cf.assistant')
   const placeholder = locale === 'en' ? `Message ${name}…` : `跟 ${name} 说点什么…`
@@ -3822,11 +3806,11 @@ function Composer({
 
   // 粘贴图片 / 文档：与「附加文件」同一条链路（主进程授权 → pending 附件条）。
   // 剪贴板带纯文本时一律按文本粘贴——Word / Excel 复制内容会顺带一张渲染图，不能把它变成附件。
-  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
-    const files = Array.from(e.clipboardData.files)
-    if (!files.length || e.clipboardData.getData('text/plain')) return
+  const onPaste = (e: ClipboardEvent): boolean => {
+    const files = Array.from(e.clipboardData?.files ?? [])
+    if (!files.length || e.clipboardData?.getData('text/plain')) return false
     e.preventDefault()
-    if (streaming) return
+    if (streaming) return true
     void (async () => {
       const picked = await Promise.all(
         files.map(async (f) =>
@@ -3851,22 +3835,24 @@ function Composer({
         return out
       })
     })()
+    return true
   }
 
   const removePending = (path: string): void =>
     setPending((prev) => prev.filter((p) => p.path !== path))
 
   const submit = (): void => {
-    const text = input
+    const text = composer.getText()
     const atts = pending.filter((p) => p.supported)
     if ((!text.trim() && atts.length === 0) || streaming) return
     // /rewind 纯渲染层指令：打开回滚面板、不发消息；此刻不可用则原样留在输入框。
     if (text.trim().toLowerCase() === '/rewind' && atts.length === 0) {
-      if (onRewind()) setInput('')
+      if (onRewind()) composer.setText('')
       return
     }
     const prevPending = pending
-    setInput('')
+    composer.setText('')
+    composer.clearHistory()
     setPending([])
     void onSend(
       text,
@@ -3874,57 +3860,76 @@ function Composer({
     ).then((sent) => {
       // 未发出（未选模型 / 请求失败，原因已 toast）：把草稿放回——但别覆盖用户在此期间新敲的内容。
       if (sent) return
-      setInput((cur) => cur || text)
+      if (!composer.getText()) composer.setText(text)
       setPending((cur) => (cur.length ? cur : prevPending))
     })
   }
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.nativeEvent.isComposing) return // 输入法组字中：按键一律交给 IME
+  const onKey = (key: ComposerKey, e: KeyboardEvent): boolean => {
     const plain = !e.shiftKey && !e.ctrlKey && !e.altKey
     // 「/ 指令」联想打开时这几个键先归联想；其余（含 Shift+Enter 换行）照旧落到输入框。
     if (slashOpen) {
-      if (plain && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      if (plain && (key === 'down' || key === 'up')) {
         e.preventDefault()
-        const d = e.key === 'ArrowDown' ? 1 : -1
+        const d = key === 'down' ? 1 : -1
         setSlashSel((i) => {
           const n = slashMatches.length
           return (Math.min(i, n - 1) + d + n) % n
         })
-        return
+        return true
       }
-      if (e.key === 'Tab' || (plain && e.key === 'Enter')) {
+      if (key === 'tab' || (plain && key === 'enter')) {
         e.preventDefault()
         const pick = slashMatches[slashCur]
         if (pick) applySlash(pick)
-        return
+        return true
       }
-      if (e.key === 'Escape') {
+      if (key === 'escape') {
         e.preventDefault()
         setSlashOff(true)
-        return
+        return true
       }
     }
     // 双击 Esc（仅空输入框、无待发附件时）打开回滚面板；联想浮层开着时 Esc 已在上面被它吃掉。
-    if (e.key === 'Escape' && plain && !input.trim() && pending.length === 0 && !streaming) {
+    if (key === 'escape' && plain && !input.trim() && pending.length === 0 && !streaming) {
       const now = Date.now()
       if (now - lastEscRef.current <= 500) {
         lastEscRef.current = 0
         e.preventDefault()
         onRewind()
-      } else lastEscRef.current = now
-      return
+        return true
+      }
+      lastEscRef.current = now
+      return false
     }
-    if (e.key !== 'Enter') return
-    if (!plain) return // 交给默认换行
+    if (key !== 'enter' || !plain) return false // 其余交给编辑器（Shift+Enter 换行）
     e.preventDefault()
     submit()
+    return true
   }
 
-  const autoGrow = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-    setInput(e.target.value)
-    setSlashOff(false) // 又动了输入：Esc 收起的联想重新可唤出
+  // 开头 `/name` 会不会生效（决定是否上色）：/compact、/rewind 须整条只有它且无附件（同 submit 与 store 的拦截）；
+  // 其余按已启用技能的显示名或文件夹名、不分大小写匹配（同主进程 loadSkillInstructionsByName）。
+  const noAtts = supported.length === 0
+  const isToken = (name: string, whole: string): boolean => {
+    const n = name.toLowerCase()
+    if ((n === 'compact' || n === 'rewind') && noAtts && whole.toLowerCase() === `/${n}`) return true
+    return skills.some((s) => s.enabled && (s.name.toLowerCase() === n || s.id.toLowerCase() === n))
   }
+
+  const composer = useComposerEditor({
+    onChange: (text) => {
+      setInput(text)
+      setSlashOff(false) // 又动了输入：Esc 收起的联想重新可唤出
+    },
+    onKey,
+    onPaste,
+    isToken
+  })
+
+  // 判定依据（技能启停、有无附件）变了而文本没变：重新识别一次开头指令。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => composer.refreshToken(), [skills, noAtts])
 
   return (
     <div className="cf-composer">
@@ -4015,17 +4020,20 @@ function Composer({
               ))}
             </div>
           )}
-          <textarea
-            ref={taRef}
-            value={input}
-            placeholder={placeholder}
-            onChange={autoGrow}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            style={{ height: boxH }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-          />
+          {/* 输入区：Lexical 接管的 contentEditable（子节点归编辑器管，React 不渲染内容）；占位提示叠在其上。 */}
+          <div className="cf-draft" style={{ height: boxH }}>
+            <div
+              ref={composer.rootRef}
+              className="cf-draft__input"
+              contentEditable
+              role="textbox"
+              aria-multiline
+              aria-label={placeholder}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+            />
+            {composer.empty && <div className="cf-draft__ph">{placeholder}</div>}
+          </div>
           <div className="cf-box__bar">
             <button
               className="cf-iconbtn"
