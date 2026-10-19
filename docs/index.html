@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Deva · 对话优先的桌面 AI 助手</title>
-<meta name="description" content="Deva：对话优先的桌面 AI 助手。平时当聊天工具用；给它一个文件夹，它就能看代码、改文件、跑命令。支持多角色、子代理、计划批准、代码回退、定时任务、手机 IM 远程对话。开源免费，Windows / macOS。" />
-<meta property="og:title" content="Deva · 对话优先的桌面 AI 助手" />
+<title>Deva · 对话式 AI 助手</title>
+<meta name="description" content="Deva：对话式 AI 助手。把 Agent 能力装进对话里，无需复杂配置，像聊天一样使用 Agent。挂载文件夹即可阅读代码、修改文件、执行命令；支持多角色、子代理、计划批准、代码回退、定时任务、手机 IM 远程对话。开源免费，Windows / macOS。" />
+<meta property="og:title" content="Deva · 对话式 AI 助手" />
 <meta property="og:description" content="All in Chat：要做的事，在对话里说一句就行。开源免费，Windows / macOS。" />
 <meta name="theme-color" content="#4F46E5" />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234F46E5'/%3E%3Cstop offset='1' stop-color='%237C3AED'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1024' height='1024' rx='224' fill='url(%23g)'/%3E%3Cg fill='%23fff' transform='translate(-27 -26)'%3E%3Crect x='312' y='272' width='96' height='380' rx='48'/%3E%3Ccircle cx='360' cy='756' r='48'/%3E%3Cpath d='M468 320 H500 A218 218 0 0 1 500 756 H468' fill='none' stroke='%23fff' stroke-width='96'/%3E%3C/g%3E%3C/svg%3E" />
@@ -463,6 +463,7 @@
     section { padding: 64px 0; }
     .nav__links { display: none; }
     .hero { padding: 56px 0 24px; }
+    .hero__lead br { display: none; }
     .hero__hint { margin-top: 36px; }
     .grid, .steps, .notice, .dl { grid-template-columns: 1fr; }
     .stage__pin { padding: 10px 0 12px; }
@@ -574,8 +575,8 @@
   <section class="hero">
     <div class="wrap">
       <span class="chip"><b>All in Chat</b>开源免费 · Windows / macOS</span>
-      <h1>对话优先的<br /><span class="grad-text">桌面 AI 助手</span></h1>
-      <p class="hero__lead">平时当聊天工具用；给它一个文件夹，它就能直接动手——看代码、改文件、跑命令。还能帮你定时做些重复的事，人不在电脑前，也能用手机接着聊。</p>
+      <h1>对话式<br /><span class="grad-text">AI 助手</span></h1>
+      <p class="hero__lead">把 Agent 能力装进对话里，无需复杂配置，像聊天一样使用 Agent。<br />挂载文件夹即可阅读代码、修改文件、执行命令；定时任务按时自动运行，离开电脑也能在手机上继续对话。</p>
       <div class="hero__cta">
         <a class="btn btn--primary" href="#download" data-dl-auto><svg class="i"><use href="#i-down"/></svg><span class="dl-label">免费下载</span></a>
         <a class="btn" href="https://github.com/sqfcyily/deva"><svg class="i"><use href="#i-gh"/></svg>查看源码</a>
@@ -755,6 +756,7 @@
         <div class="os">
           <h3><svg class="i"><use href="#i-win"/></svg>Windows</h3>
           <a class="file" data-asset="win" href="https://github.com/sqfcyily/deva/releases/latest"><code>Deva-x.y.z-setup.exe</code><span>双击安装<span class="file__size"></span></span><svg class="i"><use href="#i-down"/></svg></a>
+          <a class="file" data-asset="win-portable" href="https://github.com/sqfcyily/deva/releases/latest"><code>Deva-x.y.z-portable.zip</code><span>便携版，解压即用<span class="file__size"></span></span><svg class="i"><use href="#i-down"/></svg></a>
         </div>
         <div class="os">
           <h3><svg class="i"><use href="#i-apple"/></svg>macOS</h3>
@@ -826,7 +828,7 @@
   // 未登录的 API 每个 IP 每小时限 60 次，结果在本机缓存半小时
   ;(() => {
     const KEY = 'deva-site-release'
-    const PICK = { win: /-setup\.exe$/, 'mac-arm64': /-arm64\.dmg$/, 'mac-x64': /-x64\.dmg$/ }
+    const PICK = { win: /-setup\.exe$/, 'win-portable': /-portable\.zip$/, 'mac-arm64': /-arm64\.dmg$/, 'mac-x64': /-x64\.dmg$/ }
     const LABEL = { win: '下载 Windows 版', 'mac-arm64': '下载 macOS 版（M 系列）', 'mac-x64': '下载 macOS 版（Intel）' }
     // 该给访客哪个包：Mac 只有 Chromium 系浏览器问得出芯片架构，问不出就不猜，让人到下载区自己挑
     async function detect() {

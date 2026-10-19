@@ -6,10 +6,10 @@
 
 # Deva
 
-**对话优先的桌面 AI 助手 · All in Chat**
+**对话式 AI 助手 · All in Chat**
 
-平时当聊天工具用；给它一个文件夹，它就能直接动手——看代码、改文件、跑命令。<br />
-还能帮你定时做些重复的事，人不在电脑前，也能用手机接着聊。
+把 Agent 能力装进对话里，无需复杂配置，像聊天一样使用 Agent。<br />
+挂载文件夹即可阅读代码、修改文件、执行命令；定时任务按时自动运行，离开电脑也能在手机上继续对话。
 
 <p>
   <a href="https://github.com/sqfcyily/deva/releases"><img src="https://img.shields.io/github/v/release/sqfcyily/deva?style=flat-square&color=6D28D9&label=%E7%89%88%E6%9C%AC" alt="版本" /></a>
@@ -224,7 +224,7 @@ Deva 的大部分功能都能直接在对话里完成，不用去翻设置页、
 
 - 按「轮」删除聊天记录：在聊天区右键「删除此轮」或「选择删除」，删掉的内容模型也不会再看到
 - 浅色 / 深色 / 跟随系统，简体中文 / English
-- 在「设置 → 关于」里检查更新：Windows 在应用里下载并安装新版，macOS 下载新的安装包
+- 在「设置 → 关于」里检查更新：Windows 安装版在应用里下载并安装新版，Windows 便携版和 macOS 下载新的文件后手动替换
 
 ---
 
@@ -244,6 +244,7 @@ Deva 的大部分功能都能直接在对话里完成，不用去翻设置页、
 | 系统 | 文件 | 说明 |
 | --- | --- | --- |
 | 🪟 Windows | `Deva-x.y.z-setup.exe` | 双击安装 |
+| 🪟 Windows（便携版） | `Deva-x.y.z-portable.zip` | 解压后运行 `Deva.exe`，无需安装 |
 | 🍎 macOS（M 系列芯片） | `Deva-x.y.z-arm64.dmg` | |
 | 🍎 macOS（Intel 芯片） | `Deva-x.y.z-x64.dmg` | |
 

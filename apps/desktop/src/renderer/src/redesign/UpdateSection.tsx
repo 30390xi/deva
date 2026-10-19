@@ -50,12 +50,19 @@ export function UpdateSection(): React.JSX.Element {
         </div>
         <button className="btn btn--primary btn--sm" onClick={download}>
           <Download size={13} />
-          {mode === 'auto' ? t('settings.update.download') : t('settings.update.downloadInstaller')}
+          {mode === 'auto'
+            ? t('settings.update.download')
+            : mode === 'portable'
+              ? t('settings.update.downloadPortable')
+              : t('settings.update.downloadInstaller')}
         </button>
         {mode === 'manual' && (
           <p className="cf-update__hint">
             {IS_MAC ? t('settings.update.manualHintMac') : t('settings.update.manualHint')}
           </p>
+        )}
+        {mode === 'portable' && (
+          <p className="cf-update__hint">{t('settings.update.portableHint')}</p>
         )}
       </div>
     )

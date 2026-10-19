@@ -5,16 +5,16 @@
  * 有新版时按安装方式分两种（见 shared/update.ts 的 UpdateMode）：
  *  - Windows 上用 exe 装的：electron-updater 读 Release 里的 latest.yml，应用内下载（校验 sha512），
  *    点「重启并安装」后静默覆盖安装并自动重开；下好了没点，下次退出时也会装上；
- *  - 其他情形（mac 包没正式签名做不了自动安装、开发模式、直接运行的解压目录）：在浏览器里打开对应安装包的直链。
+ *  - Windows 便携版（zip 解压运行的）：在浏览器里打开新版 zip 的直链，用户解压替换；
+ *  - 其他情形（mac 包没正式签名做不了自动安装、开发模式）：在浏览器里打开对应安装包的直链。
  *
  * 网络都走 Chromium 网络栈（net.fetch，electron-updater 内部用 net.request），自动使用系统代理。
  */
 import { app, ipcMain, net, shell, type BrowserWindow } from 'electron'
-import { existsSync } from 'fs'
-import { dirname, join } from 'path'
 import { autoUpdater, type AppUpdater } from 'electron-updater'
 import type { UpdateMode, UpdateRelease, UpdateState } from '../../shared/update'
 import { settleActiveTurns } from './chat'
+import { installedByNsis, isPortable } from './portable'
 
 const LATEST_API = 'https://api.github.com/repos/sqfcyily/deva/releases/latest'
 
@@ -60,20 +60,17 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
- * 是否经 exe 安装程序装的：安装目录里有 NSIS 卸载程序（electron-builder 固定命名为「Uninstall <productName>.exe」）。
- * 开发模式、直接运行 win-unpacked 解压目录的都没有——这些情形交给 electron-updater 会另装出一份 Deva。
+ * 是否经 exe 安装程序装的。开发模式、便携版（zip 解压运行）都不是——这些情形交给 electron-updater
+ * 会另装出一份 Deva。
  */
 function canAutoInstall(): boolean {
-  return (
-    process.platform === 'win32' &&
-    app.isPackaged &&
-    existsSync(join(dirname(process.execPath), 'Uninstall Deva.exe'))
-  )
+  return process.platform === 'win32' && app.isPackaged && installedByNsis()
 }
 
-/** 本机该装的安装包文件名；没有对应安装包的平台返回 null（只能打开 Release 页面）。 */
+/** 本机该下载的文件名（安装包 / 便携版 zip）；没有对应文件的平台返回 null（只能打开 Release 页面）。 */
 function installerName(version: string): string | null {
-  if (process.platform === 'win32') return `Deva-${version}-setup.exe`
+  if (process.platform === 'win32')
+    return isPortable() ? `Deva-${version}-portable.zip` : `Deva-${version}-setup.exe`
   if (process.platform === 'darwin') {
     // x64 版经 Rosetta 跑在 Apple 芯片上时 process.arch 也是 x64，改推原生的 arm64 包
     const arm = process.arch === 'arm64' || app.runningUnderARM64Translation
@@ -100,7 +97,7 @@ async function check(): Promise<void> {
       setState({ phase: 'latest' })
       return
     }
-    const mode: UpdateMode = canAutoInstall() ? 'auto' : 'manual'
+    const mode: UpdateMode = canAutoInstall() ? 'auto' : isPortable() ? 'portable' : 'manual'
     // 发版时常是先在网页上发布 Release、CI 几分钟后才把安装包传上来：本机要用的文件传完之前不算有新版，
     // 免得用户点了下载却下不到（Windows 自动更新还要 latest.yml）
     const uploaded = (data.assets ?? []).filter((a) => a.state !== 'open')
@@ -108,7 +105,7 @@ async function check(): Promise<void> {
     const installer = name ? uploaded.find((a) => a.name === name) : undefined
     const ready =
       name === null ||
-      (installer !== undefined && (mode === 'manual' || uploaded.some((a) => a.name === 'latest.yml')))
+      (installer !== undefined && (mode !== 'auto' || uploaded.some((a) => a.name === 'latest.yml')))
     if (!ready) {
       found = null
       setState({ phase: 'latest' })
@@ -140,7 +137,7 @@ function getUpdater(): AppUpdater {
 async function download(): Promise<void> {
   if (!found || state.phase === 'downloading' || state.phase === 'downloaded') return
   const { release, mode, installerUrl } = found
-  if (mode === 'manual') {
+  if (mode !== 'auto') {
     await shell.openExternal(installerUrl ?? release.pageUrl)
     return
   }

@@ -543,6 +543,8 @@ const zhCN: MessageTree = {
       downloadInstaller: '下载安装包',
       manualHintMac: '下载后打开安装包，先退出 Deva，再把 Deva 拖进「应用程序」替换旧版。',
       manualHint: '下载后运行安装包，直接覆盖安装即可。',
+      downloadPortable: '下载便携版',
+      portableHint: '下载后退出 Deva，解压新版本并替换原文件夹即可，设置与对话不受影响。',
       downloading: '正在下载 {percent}%',
       downloaded: '新版本 {version} 已下载',
       install: '重启并安装',
@@ -1534,6 +1536,9 @@ const en: MessageTree = {
       manualHintMac:
         'Open the downloaded installer, quit Deva, then drag Deva into Applications to replace the old version.',
       manualHint: 'Run the downloaded installer to install over the current version.',
+      downloadPortable: 'Download portable version',
+      portableHint:
+        'Quit Deva, then extract the new version and replace the old folder. Your settings and conversations are not affected.',
       downloading: 'Downloading {percent}%',
       downloaded: 'Version {version} downloaded',
       install: 'Restart and install',

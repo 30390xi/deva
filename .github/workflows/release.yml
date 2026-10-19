@@ -1,4 +1,4 @@
-# 有新的 v* tag 时打包 Windows（exe）/ macOS 安装包，传到对应的 GitHub Release，并按提交自动生成版本说明。
+# 有新的 v* tag 时打包 Windows（exe 安装包 + zip 便携版）/ macOS 安装包，传到对应的 GitHub Release，并按提交自动生成版本说明。
 # 发版前先改 apps/desktop/package.json 的 version 并提交，然后二选一：
 #  - 在 GitHub 网页上新建 Release（顺带建 tag）并直接发布：CI 几分钟后传上安装包、把自动生成的说明接在
 #    网页上写的说明后面（没写就只有自动生成的）。之后随时可以在网页上改说明。
@@ -25,7 +25,7 @@ jobs:
         include:
           - name: win-x64
             os: windows-latest
-            args: --win nsis --x64
+            args: --win nsis zip --x64
           # node-pty 按平台/架构拆包，pnpm 只装本机那份，所以两种芯片各用对应的机器原生打包
           - name: mac-arm64
             os: macos-latest
@@ -72,6 +72,7 @@ jobs:
             apps/desktop/dist/*-setup.exe
             apps/desktop/dist/*-setup.exe.blockmap
             apps/desktop/dist/latest.yml
+            apps/desktop/dist/*-portable.zip
             apps/desktop/dist/*.dmg
           if-no-files-found: error
 

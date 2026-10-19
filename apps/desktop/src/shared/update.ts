@@ -16,9 +16,10 @@ export interface UpdateRelease {
 /**
  * 有新版时怎么装：
  *  - auto：Windows 上用 exe 安装的——应用内下载，点「重启并安装」覆盖安装；
+ *  - portable：Windows 便携版（zip 解压运行的）——在浏览器里下载新版 zip，用户解压替换原文件夹；
  *  - manual：mac（包没正式签名，做不了自动安装）及其他情形——在浏览器里下载对应的安装包，用户自己装。
  */
-export type UpdateMode = 'auto' | 'manual'
+export type UpdateMode = 'auto' | 'manual' | 'portable'
 
 export type UpdateState =
   | { phase: 'idle' }

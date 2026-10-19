@@ -29,6 +29,7 @@ import { registerTasksIpc } from './services/tasks'
 import { startScheduler } from './services/scheduler'
 import { registerRemoteIpc, stopAllChannels } from './services/remote'
 import { registerUpdaterIpc } from './services/updater'
+import { registerToastIdentity } from './services/portable'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -224,6 +225,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
   electronApp.setAppUserModelId('dev.sqfcy.deva')
+  // 便携版没有开始菜单快捷方式：注册通知显示名与图标，否则通知标题是原始 ID（须早于第一条通知）
+  registerToastIdentity('dev.sqfcy.deva')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

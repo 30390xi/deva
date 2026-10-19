@@ -6,10 +6,10 @@
 
 # Deva
 
-**A chat-first desktop AI assistant · All in Chat**
+**A conversational AI assistant · All in Chat**
 
-Use it as an everyday chat app; hand it a folder and it gets to work — reading code, editing files, running commands.<br />
-It can also handle repetitive chores on a schedule, and you can keep chatting from your phone when you're away from your computer.
+Agent capabilities built into the conversation — no complex setup, just chat to put an agent to work.<br />
+Mount a folder and it reads code, edits files and runs commands; scheduled tasks run on time, and you can continue the conversation from your phone when you're away from your computer.
 
 <p>
   <a href="https://github.com/sqfcyily/deva/releases"><img src="https://img.shields.io/github/v/release/sqfcyily/deva?style=flat-square&color=6D28D9&label=release" alt="Release" /></a>
@@ -224,7 +224,7 @@ When a conversation is about to fill the model's context window, earlier content
 
 - Delete chat history by "turn": right-click in the chat and choose "Delete this turn" or "Select to delete"; deleted content is no longer seen by the model either
 - Light / dark / follow system theme; 简体中文 / English
-- Check for updates in "Settings → About": on Windows the new version downloads and installs from inside the app; on macOS you get the new installer
+- Check for updates in "Settings → About": the Windows installer version downloads and installs updates from inside the app; for the Windows portable version and macOS, download the new file and replace the old one
 
 ---
 
@@ -244,6 +244,7 @@ Download from [Releases](https://github.com/sqfcyily/deva/releases):
 | System | File | Notes |
 | --- | --- | --- |
 | 🪟 Windows | `Deva-x.y.z-setup.exe` | Double-click to install |
+| 🪟 Windows (portable) | `Deva-x.y.z-portable.zip` | Extract and run `Deva.exe`, no installation needed |
 | 🍎 macOS (Apple Silicon) | `Deva-x.y.z-arm64.dmg` | |
 | 🍎 macOS (Intel) | `Deva-x.y.z-x64.dmg` | |
 

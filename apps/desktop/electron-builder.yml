@@ -16,13 +16,20 @@ asar: true
 # mac 包做 ad-hoc 签名（免费、无证书），见脚本内说明；其他平台直接跳过
 afterPack: ./scripts/adhoc-sign.cjs
 
+# Windows 便携版 zip 套一层 Deva\ 目录（electron-builder 默认把文件直接放在压缩包根目录），见脚本内说明
+afterAllArtifactBuild: ./scripts/portable-zip.cjs
+
 # Electron 二进制走国内镜像，避免打包时卡在下载
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
 win:
+  # nsis = 安装包；zip = 便携版（解压后直接运行 Deva.exe，数据同样在 ~/.deva，与安装版共用）
   target:
     - nsis
+    - zip
+  # 只有 zip 用到这个名字：nsis 段自己的 artifactName 优先
+  artifactName: ${productName}-${version}-portable.${ext}
   icon: build/icon.ico
   # 「检查更新」的下载源（electron-updater 读这里）：打包时据此生成 latest.yml 与安装目录里的 app-update.yml，
   # 实际上传由 CI 的 release job 完成。只挂在 win 段——mac 不走自动更新

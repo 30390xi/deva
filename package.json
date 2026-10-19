@@ -1,7 +1,7 @@
 {
   "name": "deva-workspace",
   "private": true,
-  "description": "Deva - 对话优先的智能体工作台",
+  "description": "Deva - 对话式 AI 助手 · All in Chat",
   "license": "MIT",
   "packageManager": "pnpm@10.8.0",
   "engines": {
