@@ -1594,8 +1594,23 @@ function WorkspaceMenu({ root }: { root: string }): React.JSX.Element {
 }
 
 /**
+ * 流式生成中的展示清洗：模型偶尔用代码块 / 引号包裹整段，边生成边剥掉开头的围栏行与引号、
+ * 末尾正在长出来的收尾围栏，免得这些符号先闪出来再消失。结束后以主进程清洗的全文为准。
+ */
+function cleanStreamingCommit(raw: string): string {
+  let s = raw.trimStart()
+  if (s.startsWith('```')) {
+    const nl = s.indexOf('\n')
+    if (nl < 0) return ''
+    s = s.slice(nl + 1).replace(/\n?`{0,3}$/, '')
+  }
+  return s.replace(/^["“]/, '')
+}
+
+/**
  * 轻量提交框（v1 只做「暂存全部改动 + 提交」，不含逐文件 diff/staging）：
  * 顶部一行改动数量摘要；一个信息 textarea；「AI 生成」按当前模型走 generateCommitMessage（无模型/无密钥则灰掉）。
+ * 生成时文字流式填入输入框（只读），按钮变「停止生成」；中断保留已生成部分，关闭提交框也会中断。
  * 有冲突时禁止提交并提示先解决——避免把未合并状态提交进去。
  */
 function CommitModal({
@@ -1618,6 +1633,23 @@ function CommitModal({
   const [msg, setMsg] = useState('')
   const [gen, setGen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 进行中的生成请求 id：停止生成 / 关闭提交框时据此中断。
+  const genIdRef = useRef<string | null>(null)
+  const msgRef = useRef<HTMLTextAreaElement>(null)
+
+  // 关闭提交框（卸载）时中断仍在进行的生成，免得主进程白跑到超时。
+  useEffect(
+    () => () => {
+      if (genIdRef.current) void window.deva.git.cancelCommitMessage(genIdRef.current)
+    },
+    []
+  )
+
+  // 流式填入时输入框跟到末尾。
+  useEffect(() => {
+    const el = msgRef.current
+    if (gen && el) el.scrollTop = el.scrollHeight
+  }, [gen, msg])
 
   // 打开即重取一次状态：父级快照可能早于本轮对话 / 用户在外部新建的文件，避免改动数与可提交态过期。
   const [status, setStatus] = useState(initialStatus)
@@ -1644,18 +1676,39 @@ function CommitModal({
   }, [status])
 
   const hasConflicts = status.conflicts.length > 0
-  const canCommit = Boolean(msg.trim()) && changed > 0 && !hasConflicts && !busy
+  const canCommit = Boolean(msg.trim()) && changed > 0 && !hasConflicts && !busy && !gen
+
+  const stopGenerate = (): void => {
+    if (genIdRef.current) void window.deva.git.cancelCommitMessage(genIdRef.current)
+  }
 
   const generate = async (): Promise<void> => {
-    if (!model) return
+    if (!model || genIdRef.current) return
+    const id = `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const prev = msg
+    let raw = ''
+    genIdRef.current = id
     setGen(true)
+    setMsg('')
+    const off = window.deva.git.onCommitMessageDelta((rid, text) => {
+      if (rid !== id) return
+      raw += text
+      setMsg(cleanStreamingCommit(raw))
+    })
     try {
-      const r = await window.deva.git.generateCommitMessage(root, model, locale)
+      const r = await window.deva.git.generateCommitMessage(root, model, locale, id)
       if (r.ok && r.text) setMsg(r.text)
-      else toast.show(gitErrorToast(t, r))
+      else {
+        // 失败，或中断时一个字都还没出来：还原生成前的内容；中断不算错误、不提示。
+        setMsg(prev)
+        if (!r.aborted) toast.show(gitErrorToast(t, r))
+      }
     } catch {
+      setMsg(prev)
       toast.show({ variant: 'error', message: gitReasonText(t, 'error') })
     } finally {
+      off()
+      genIdRef.current = null
       setGen(false)
     }
   }
@@ -1707,23 +1760,32 @@ function CommitModal({
       </h2>
       <p className="cf-commit__meta">{meta}</p>
       <textarea
+        ref={msgRef}
         className="input cf-commit__msg"
         value={msg}
         placeholder={t('cf.git.commitPlaceholder')}
         onChange={(e) => setMsg(e.target.value)}
+        readOnly={gen}
         autoFocus
       />
       <div className="cf-commit__bar">
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => void generate()}
-          disabled={!model || gen || busy}
-          title={model ? t('cf.git.aiHint') : t('cf.git.aiNoModel')}
-        >
-          <Sparkles size={14} />
-          {gen ? t('cf.git.aiGenerating') : t('cf.git.aiGenerate')}
-        </button>
+        {gen ? (
+          <button type="button" className="btn btn--ghost" onClick={stopGenerate}>
+            <Square size={12} fill="currentColor" />
+            {t('cf.git.aiStop')}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => void generate()}
+            disabled={!model || busy}
+            title={model ? t('cf.git.aiHint') : t('cf.git.aiNoModel')}
+          >
+            <Sparkles size={14} />
+            {t('cf.git.aiGenerate')}
+          </button>
+        )}
         <div className="cf-commit__actions">
           <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>
             {t('cf.cancel')}

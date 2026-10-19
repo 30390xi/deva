@@ -893,7 +893,7 @@ const zhCN: MessageTree = {
       commitPlaceholder: '填写提交信息…',
       commitDo: '提交',
       aiGenerate: 'AI 生成',
-      aiGenerating: '生成中…',
+      aiStop: '停止生成',
       aiHint: '用当前模型据改动生成提交信息',
       aiNoModel: '需先在设置中配置可用模型与密钥',
       err: {
@@ -1896,7 +1896,7 @@ const en: MessageTree = {
       commitPlaceholder: 'Enter a commit message…',
       commitDo: 'Commit',
       aiGenerate: 'AI generate',
-      aiGenerating: 'Generating…',
+      aiStop: 'Stop generating',
       aiHint: 'Generate a commit message from the changes using the current model',
       aiNoModel: 'Configure an available model and API key in Settings first',
       err: {

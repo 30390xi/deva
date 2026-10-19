@@ -620,6 +620,8 @@ export type GitGenLocale = 'zh-CN' | 'en'
 export interface GitGenerateResult {
   ok: boolean
   text?: string
+  /** 被用户中断：text 为已生成的部分（可能为空串）。 */
+  aborted?: boolean
   reason?: GitFailReason
   message?: string
 }
@@ -1096,13 +1098,26 @@ const api = {
     /** 推送（无 upstream 时传 branch 触发 -u origin <branch> 首推，否则传 null） */
     push: (dir: string, setUpstreamBranch: string | null): Promise<GitOpResult> =>
       ipcRenderer.invoke('git:push', dir, setUpstreamBranch),
-    /** AI 生成提交信息：把「将要提交」的 diff 交模型生成（密钥在主进程解密，不经渲染层）；locale 跟随界面语言 */
+    /**
+     * AI 生成提交信息：把「将要提交」的 diff 交模型生成（密钥在主进程解密，不经渲染层）；locale 跟随界面语言。
+     * 带 reqId 时边生成边经 onCommitMessageDelta 推送原始片段，并可用 cancelCommitMessage 中断。
+     */
     generateCommitMessage: (
       dir: string,
       model: GitGenModel,
-      locale: GitGenLocale
+      locale: GitGenLocale,
+      reqId?: string
     ): Promise<GitGenerateResult> =>
-      ipcRenderer.invoke('git:generate-commit-message', dir, model, locale)
+      ipcRenderer.invoke('git:generate-commit-message', dir, model, locale, reqId),
+    /** 中断 reqId 对应的生成（已结束则无操作） */
+    cancelCommitMessage: (reqId: string): Promise<boolean> =>
+      ipcRenderer.invoke('git:cancel-commit-message', reqId),
+    /** 订阅生成中的原始文本片段，返回取消订阅函数 */
+    onCommitMessageDelta: (cb: (reqId: string, text: string) => void): (() => void) => {
+      const listener = (_e: unknown, reqId: string, text: string): void => cb(reqId, text)
+      ipcRenderer.on('git:commit-gen-delta', listener)
+      return () => ipcRenderer.removeListener('git:commit-gen-delta', listener)
+    }
   },
   /**
    * 定时任务 / 自动任务（全局 ~/.deva/tasks.json）：列出 / 读取 / 创建 / 更新 / 删除 / 启停 / 立即运行。

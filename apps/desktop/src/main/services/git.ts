@@ -500,6 +500,9 @@ interface GenModelConfig {
 const MAX_DIFF_CHARS = 24_000 // 送入模型的 diff 上限（超出截断，避免超长上下文）
 const GEN_TIMEOUT_MS = 60_000 // 生成整体超时兜底（无 TTY，防挂起）
 
+/** 进行中的生成（渲染层给的请求 id → 中断器），供「停止生成」/ 关闭提交框时中断。 */
+const genControllers = new Map<string, AbortController>()
+
 type GenLocale = 'zh-CN' | 'en'
 
 const COMMIT_SYSTEM_PROMPT_ZH = [
@@ -889,9 +892,11 @@ export function registerGitIpc(): void {
 
   // AI 生成提交信息：取「将要提交」的 diff（优先已暂存，无则回退工作区已跟踪改动）→ 交模型生成。
   // 密钥仍按 providerId 在主进程内解密注入（streamChat），不经渲染层；diff 只在本地读取、送模型。
+  // 带 reqId 时边生成边推送原始片段（git:commit-gen-delta），可经 git:cancel-commit-message 中断；
+  // 结束仍回清洗后的全文。用户中断回 aborted:true 与已生成部分（可能为空串）。
   ipcMain.handle(
     'git:generate-commit-message',
-    async (_e, dir: string, model: GenModelConfig, locale?: GenLocale) => {
+    async (e, dir: string, model: GenModelConfig, locale?: GenLocale, reqId?: string) => {
       assertInside(dir)
       if (!model || typeof model.model !== 'string' || !model.model.trim())
         return { ok: false as const, reason: 'error' as GitFailReason, message: 'no-model' }
@@ -931,6 +936,12 @@ export function registerGitIpc(): void {
 
       const ctrl = new AbortController()
       const timer = setTimeout(() => ctrl.abort(), GEN_TIMEOUT_MS)
+      const id = typeof reqId === 'string' && reqId ? reqId : null
+      if (id) genControllers.set(id, ctrl)
+      // 窗口关掉就别再白跑到超时。
+      const sender = e.sender
+      const onGone = (): void => ctrl.abort()
+      sender.once('destroyed', onGone)
       try {
         let text = ''
         let errKind: string | null = null
@@ -948,27 +959,43 @@ export function registerGitIpc(): void {
             signal: ctrl.signal
           }
         )) {
-          if (ev.type === 'text_delta') text += ev.text
-          else if (ev.type === 'error') {
+          if (ev.type === 'text_delta') {
+            text += ev.text
+            if (id && !sender.isDestroyed()) sender.send('git:commit-gen-delta', id, ev.text)
+          } else if (ev.type === 'error') {
             errKind = ev.error.kind
             errMsg = ev.error.message
           }
         }
+        // 用户主动中断（不是超时）：已生成多少回多少，不当错误报。
+        if (id && !genControllers.has(id))
+          return { ok: true as const, text: cleanCommitMessage(text), aborted: true as const }
         if (errKind && !text.trim())
           return { ok: false as const, reason: genReason(errKind), message: errMsg }
         const cleaned = cleanCommitMessage(text)
         if (!cleaned)
           return { ok: false as const, reason: 'error' as GitFailReason, message: 'empty-response' }
         return { ok: true as const, text: cleaned }
-      } catch (e) {
+      } catch (err) {
         return {
           ok: false as const,
           reason: 'error' as GitFailReason,
-          message: (e as Error)?.message ?? String(e)
+          message: (err as Error)?.message ?? String(err)
         }
       } finally {
         clearTimeout(timer)
+        if (id) genControllers.delete(id)
+        sender.off('destroyed', onGone)
       }
     }
   )
+
+  // 中断进行中的生成：先摘掉登记再中断，生成处据「已不在表里」判定为用户中断。
+  ipcMain.handle('git:cancel-commit-message', (_e, reqId: string): boolean => {
+    const ctrl = genControllers.get(reqId)
+    if (!ctrl) return false
+    genControllers.delete(reqId)
+    ctrl.abort()
+    return true
+  })
 }
