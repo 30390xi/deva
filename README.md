@@ -30,7 +30,7 @@
 ---
 
 <p align="center">
-  <img src="docs/highlights.svg" alt="Deva 亮点演示：All in Chat、多角色、子智能体、代码回退、定时任务、手机回复" width="100%" />
+  <img src="docs/deva.svg" alt="Deva 亮点演示：All in Chat、多角色、子智能体、代码回退、定时任务、手机回复" width="100%" />
 </p>
 
 ## ✨ 亮点

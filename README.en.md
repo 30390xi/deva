@@ -30,7 +30,7 @@ Mount a folder and it reads code, edits files and runs commands; scheduled tasks
 ---
 
 <p align="center">
-  <img src="docs/highlights.svg" alt="Deva highlights: All in Chat, multiple personas, subagents, code rewind, scheduled tasks, replying from your phone" width="100%" />
+  <img src="docs/deva.en.svg" alt="Deva highlights: All in Chat, multiple personas, subagents, code rewind, scheduled tasks, replying from your phone" width="100%" />
 </p>
 
 ## ✨ Highlights
