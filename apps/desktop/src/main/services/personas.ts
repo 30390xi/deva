@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
@@ -8,7 +8,7 @@ import {
   writeAvatarImage as writeAvatarImageFile
 } from './avatar-image'
 import { getConfig, getDevaHome, setConfig } from './config'
-import { DEFAULT_PERSONAS } from './default-personas'
+import { DEFAULT_PERSONAS, LEGACY_PROMPT_HASHES, type DefaultPersona } from './default-personas'
 import { fmScalar, fmString, parseFrontmatter } from './frontmatter'
 import { reassignTaskPersona } from './tasks'
 
@@ -355,6 +355,11 @@ export function enabledPersonas(): { name: string; prompt: string }[] {
  *  - 已种过（或用户之后删掉）→ 不再种、不复活；
  *  - 将来往 `DEFAULT_PERSONAS` 新增一条 → 下次启动只补种这条新的，老角色不动。
  *
+ *
+ * 提示词跟随新版：`personas.seededPrompt[id]` 记下最近一次种入 / 更新写进去的默认提示词哈希（基线）。
+ * 默认提示词变了且磁盘上的仍等于基线（用户没改过）→ 换成新版；用户改过 → 保留其版本。只看提示词，
+ * 名称、头像等其余字段用户常改，不参与比对也不被覆盖。
+ *
  * 迁移：历史用户的旧守卫位 `personas.seededGeneral === true` 一次性并入 `seeded.general = true`
  * 并删除旧键，保持 config 整洁。
  */
@@ -366,12 +371,25 @@ export function ensureSeededPersonas(): void {
     base.seeded && typeof base.seeded === 'object'
       ? { ...(base.seeded as Record<string, boolean>) }
       : {}
+  const seededPrompt: Record<string, string> =
+    base.seededPrompt && typeof base.seededPrompt === 'object'
+      ? { ...(base.seededPrompt as Record<string, string>) }
+      : {}
   const hadLegacyGuard = base.seededGeneral === true
   if (hadLegacyGuard) seeded.general = true // 旧守卫位 → 视 general 已种入（不再重种 / 不改现有显示名）
 
   let changed = false
   for (const def of DEFAULT_PERSONAS) {
-    if (seeded[def.id] === true) continue // 已种过（或被用户删除）→ 跳过，绝不复活
+    const target = promptHash(def.prompt)
+    if (seeded[def.id] === true) {
+      // 已种过（或被用户删除）→ 绝不复活；只在默认提示词有新版时尝试跟随。
+      if (seededPrompt[def.id] === target) continue
+      if (refreshDefaultPrompt(def, seededPrompt[def.id], target)) {
+        seededPrompt[def.id] = target
+        changed = true
+      }
+      continue
+    }
     upsertPersona({
       id: def.id,
       name: def.name,
@@ -384,17 +402,49 @@ export function ensureSeededPersonas(): void {
       enabled: def.enabled
     })
     seeded[def.id] = true
+    seededPrompt[def.id] = target
     changed = true
   }
 
-  // 无新增且无遗留旧守卫位需清理 → 不必落盘。
+  // 无新增 / 更新且无遗留旧守卫位需清理 → 不必落盘。
   if (!changed && !hadLegacyGuard) return
 
   // 置守卫位：读-合并，保住 upsert 刚写入的 enabled 映射（R3：setConfig 顶层浅合并，别清空子对象）。
   const after = getConfig().personas
   const merged = after && typeof after === 'object' ? (after as Record<string, unknown>) : {}
   delete merged.seededGeneral // 迁移后去掉历史键（已并入 seeded）
-  setConfig({ personas: { ...merged, seeded } })
+  setConfig({ personas: { ...merged, seeded, seededPrompt } })
+}
+
+/** 提示词指纹：统一换行、去首尾空白后取 sha256（落盘时正文本就 trim 过，读回来可直接比）。 */
+function promptHash(prompt: string): string {
+  return createHash('sha256').update(prompt.replace(/\r\n/g, '\n').trim()).digest('hex')
+}
+
+/**
+ * 让已种入的默认角色跟随新版默认提示词；返回 true 表示磁盘上已是新版（调用方据此记为新基线）。
+ * 「用户没改过」= 磁盘上的提示词等于基线；本机制之前种入的老安装没有基线，改比对历史默认版本
+ * （`LEGACY_PROMPT_HASHES`）。只替换正文，frontmatter 原样保留；角色已被删或提示词被改过 → 不动。
+ */
+function refreshDefaultPrompt(
+  def: DefaultPersona,
+  baseline: string | undefined,
+  target: string
+): boolean {
+  const cur = getPersona(def.id)
+  if (!cur) return false
+  const curHash = promptHash(cur.prompt)
+  if (curHash === target) return true
+  const untouched = baseline
+    ? curHash === baseline
+    : (LEGACY_PROMPT_HASHES[def.id] ?? []).includes(curHash)
+  if (!untouched) return false
+  try {
+    writeFileSync(personaFile(def.id), composePersonaMd({ ...cur, prompt: def.prompt }), 'utf8')
+    return true
+  } catch {
+    return false // 写失败：不记基线，下次启动再试
+  }
 }
 
 /** Agent 提示词读写 IPC（全局；启用态入 config.json）。 */

@@ -7,6 +7,7 @@ import XIAOMAJIANG from "./xiaomajiang-personas"
  * 每条默认角色是一个自包含的 `DefaultPersona` 常量（含身份、主题色、开场白、提示词等），
  * 由 `DEFAULT_PERSONAS` 数组收拢；`personas.ts` 的 `ensureSeededPersonas()` 首启时逐条种入
  * `~/.deva/personas/<id>.md`（按 id 幂等、防「删除后复活」、支持将来只补种新增的那条）。
+ * 之后改了某条的 `prompt`，已安装用户只要没改过该角色的提示词，升级后就会自动换成新版。
  *
  * **新增一个默认角色**：在下方照葫芦画瓢写一个 `const XXX: DefaultPersona`（连同其提示词），
  * 再追加到文末的 `DEFAULT_PERSONAS` 数组即可——无需改动 `personas.ts` 的种入逻辑。
@@ -40,3 +41,18 @@ export interface DefaultPersona {
  * 用户之后可拖拽 / 置顶改写，见 personas.ts 的 order 机制）。
  */
 export const DEFAULT_PERSONAS: DefaultPersona[] = [DEVA, XIAOMAJIANG]
+
+/**
+ * 「提示词跟随新版」上线前各发布版本（v0.1.2–v0.1.9）出现过的默认提示词哈希（算法见 personas.ts `promptHash`）。
+ * 那时 config 只记了「已种入」、没记种入的是哪一版，老安装靠这张表判断提示词是否被用户改过。
+ * 此后每次种入 / 更新都会在 config 的 `personas.seededPrompt` 记下基线，**以后再改默认提示词无需往这里追加**。
+ */
+export const LEGACY_PROMPT_HASHES: Record<string, string[]> = {
+  general: [
+    'd4e72f06a416499e6c8e03ad4e79fe012dd3227b086fdcf313d5f99f0574299c' // v0.1.2–v0.1.9
+  ],
+  xiaomajiang: [
+    '9be2c7d15d58f4022550377011a816cc02faee574c2a6519244cac4589fc8e85', // v0.1.2–v0.1.4
+    'd553071fd3e2608d59e0524259a1c15c4b2d747bb6d819309f02266069e14546', // v0.1.5–v0.1.9
+  ]
+}
