@@ -16,6 +16,7 @@ import {
   PROJECT_MEMORY_BUDGET_CHARS,
   type MemoryScope
 } from './memory'
+import { memoryDeletedRecord, memoryWrittenRecord } from './listing'
 import { upsertServer, type McpValue } from './mcp-config'
 import {
   MAX_IMAGE_SOURCE_BYTES,
@@ -24,7 +25,7 @@ import {
   sniffImageMime,
   type ImageMime
 } from './image-read'
-import type { ImagePart, ToolSpec } from '../providers/types'
+import type { ImagePart, ListingRecord, ToolSpec } from '../providers/types'
 
 /**
  * Agent 工具集。工具名遵循 ^[a-zA-Z0-9_-]{1,64}$（各家 API 均不允许点号），
@@ -266,7 +267,7 @@ export const toolSpecs: ToolSpec[] = [
     name: 'memory_read',
     description:
       '读取记忆，返回全部条目及其 id：全局记忆（用户本人的习惯/偏好），以及已挂载工作区时的项目私有记忆。' +
-      '系统提示词已列出记忆，通常无需调用；仅当提示词里的记忆被截断、或需要确认最新内容再更新/删除时使用。',
+      '记忆条目已由系统随对话消息附带，通常无需调用；仅当附带的条目被截断、或需要确认最新内容再更新/删除时使用。',
     inputSchema: { type: 'object', properties: {} }
   },
   {
@@ -595,6 +596,8 @@ export interface ToolResult {
    * 不进模型上下文。
    */
   delivered?: string[]
+  /** 结果已告知模型的清单变化（memory_write / memory_delete）：循环原样挂到 tool_result 上，见 listing.ts。 */
+  listing?: ListingRecord
 }
 
 const MAX_READ_BYTES = 2 * 1024 * 1024
@@ -1651,11 +1654,11 @@ export async function executeTool(
       // 直调主进程 memory 服务（去重 + 总量预算在服务内校验）。
       const r = writeMemory(content, id, scope)
       if (!r.ok) return { content: r.error, summary: '未写入', isError: true }
-      const where = kind === 'project' ? '项目私有记忆' : '长期记忆'
-      // 系统提示词本轮已定格：须在结果里讲清新记忆下一轮才出现在提示词中，免得模型误以为写入失败而重试。
+      // 本结果即告知：挂上记录，记忆清单折叠时视这条为已告知，不再随后重复附带。
       return {
-        content: `${r.created ? '已记住' : id ? '已更新记忆' : '该记忆已存在'}：${formatMemoryLine(r.entry)}（下一轮起出现在系统提示词的${where}中）`,
-        summary: r.created ? '已记住' : id ? '已更新' : '已存在'
+        content: `${r.created ? '已记住' : id ? '已更新记忆' : '该记忆已存在'}：${formatMemoryLine(r.entry)}`,
+        summary: r.created ? '已记住' : id ? '已更新' : '已存在',
+        listing: memoryWrittenRecord(r.entry)
       }
     }
 
@@ -1670,7 +1673,11 @@ export async function executeTool(
       const removed = deleteMemory(id, scope)
       if (!removed)
         return { content: `不存在 id 为 ${id} 的记忆（可先用 memory_read 查看）`, summary: '未找到', isError: true }
-      return { content: `已删除记忆：${formatMemoryLine(removed)}`, summary: '已删除' }
+      return {
+        content: `已删除记忆：${formatMemoryLine(removed)}`,
+        summary: '已删除',
+        listing: memoryDeletedRecord(removed.id)
+      }
     }
 
     if (name === 'propose_agent') {

@@ -18,8 +18,9 @@ import { getDevaHome } from './config'
  *   memory_write 以 `scope` 参数选作用域；memory_delete 按 id 前缀（m_ 全局 / p_ 项目）自动定位。
  *   这三个工具是受控接口（同 create_skill），由主进程直读直写、负责去重与预算校验；文件工具虽也能
  *   直接改 memory.json，但提示词要求模型始终走这三个工具。
- * - **每轮开头注入系统提示词**（`memoryPromptSection`）：轮内定格，中途写入不改本轮 system，
- *   保持提示缓存前缀稳定；新记忆下一轮起生效（本轮靠 tool_result 告知模型）。
+ * - **规则进系统提示词、条目随消息下发**：系统提示词只放固定的规则段（`memoryPromptSection`），条目由
+ *   listing.ts 附在消息里、有变化只发增量——记忆增删改不动系统提示词，提示缓存前缀稳定。模型自己写入 /
+ *   删除的那条由工具结果告知，不再重复附带。
  * - **记忆不得凌驾规范**：用户纠正过的做法要求照做（否则同样的错会反复犯），但注入前言明确其不得凌驾规范与
  *   安全底线；防网页/MCP 内容诱导模型写入持久化指令靠写入侧约束（工具结果里的「记住」不算用户意愿）。
  * - 条目数、单条长度、总字数三重上限（两个作用域各自独立计），免得记忆无限膨胀挤占上下文。总字数上限即注入
@@ -46,7 +47,7 @@ export const GLOBAL_SCOPE: MemoryScope = { kind: 'global' }
 export const MEMORY_MAX_ENTRIES = 100
 /** 单条字数上限（两个作用域共用）：记忆应是一句话事实，不是长文。 */
 export const MEMORY_MAX_CHARS = 300
-/** 全局：总字数上限（= 注入系统提示词的预算，按 formatMemoryLine 口径计）：写入后超出即拒写。 */
+/** 全局：总字数上限（= 随消息附带的预算，按 formatMemoryLine 口径计）：写入后超出即拒写。 */
 export const MEMORY_BUDGET_CHARS = 4000
 /** 项目私有记忆：独立的条目数 / 总字数上限（不与全局共用预算）。 */
 export const PROJECT_MEMORY_MAX_ENTRIES = 60
@@ -233,36 +234,21 @@ export function clearMemories(scope: MemoryScope = GLOBAL_SCOPE): void {
   saveMemories(scope, [])
 }
 
-/** 供 memory_read 回灌与提示词注入共用的单行格式。 */
+/** 供 memory_read 回灌与记忆清单共用的单行格式。 */
 export function formatMemoryLine(e: MemoryEntry): string {
   return `- [${e.id}] ${e.content}`
 }
 
-/** 按预算列出条目行（写入已按总量拒超，正常不会截断；这里兜底手改文件 / 旧数据）。 */
-function entryLines(entries: MemoryEntry[], budget: number): string[] {
-  const lines: string[] = []
-  let used = 0
-  for (const e of entries) {
-    const line = formatMemoryLine(e)
-    if (used + line.length > budget) break
-    lines.push(line)
-    used += line.length
-  }
-  if (lines.length < entries.length)
-    lines.push(`  （另有 ${entries.length - lines.length} 条未列出，可用 memory_read 查看全部；记忆偏多时请合并或清理过时条目。）`)
-  return lines
-}
-
 /**
- * 系统提示词的记忆段（每轮开头定格）。全局段无论有无记忆都返回——记录指引须常驻，
- * 否则首条记忆永远不会被写下；挂载了工作区（root 非空）时再追加「项目私有记忆」段，同理常驻。
+ * 系统提示词的记忆段：只有固定的规则说明，**不含条目**——条目随消息下发（见 listing.ts），记忆增删改不动
+ * 系统提示词。全局段恒在（记录指引须常驻，否则首条记忆永远不会被写下）；挂载了工作区（root 非空）时再追加
+ * 「项目私有记忆」段，同理常驻。
  */
 export function memoryPromptSection(opts: { writable: boolean; root?: string | null }): string[] {
   const root = opts.root || null
   const lines: string[] = []
 
   // ── 全局记忆
-  const globals = listMemories(GLOBAL_SCOPE)
   if (opts.writable) {
     lines.push(
       '【长期记忆】你拥有一份跨对话、与项目无关的全局记忆（memory_write 的 scope="global"，默认），用于记住**用户本人**的长期习惯与偏好（如语言与行文偏好、常用工具与技术栈、工作方式、明确表达过的好恶、对你的纠正与要求）。',
@@ -273,34 +259,23 @@ export function memoryPromptSection(opts: { writable: boolean; root?: string | n
       `  · 维护：写入前对照已有记忆——同一主题已有条目就用 \`memory_write\` 带其 id 更新，不要重复新增；用户要求忘记、或偏好已变/与旧记忆矛盾时，用 \`memory_delete\` 删除或更新旧条目。全局记忆总量上限 ${MEMORY_BUDGET_CHARS} 字，写满时须先合并精简或删除旧条目再写。`
     )
   } else {
-    lines.push('【长期记忆】以下是用户的全局长期记忆（习惯与偏好），请在完成任务时遵循；本次执行中记忆为只读。')
+    lines.push('【长期记忆】用户的全局长期记忆（习惯与偏好）请在完成任务时遵循；本次执行中记忆为只读。')
   }
-  if (!globals.length) {
-    lines.push('  （当前尚无全局记忆）')
-  } else {
-    lines.push(
-      '以下为已记住的内容（关于用户的背景与偏好，以及用户纠正过的做法——后者请照做，同样的错不要再犯；记忆不得凌驾于上述规范与安全底线，与用户当前的明确要求冲突时以当前要求为准）：',
-      ...entryLines(globals, MEMORY_BUDGET_CHARS)
-    )
-  }
+  lines.push(
+    '记忆条目不在此处列出，而是由系统随对话消息附带：「【记忆条目】」给出当前全部条目，之后有新增、更新或删除时以「【记忆更新】」告知，以最近的告知为准' +
+      (opts.writable ? '；你自己用 memory_write / memory_delete 做的改动以工具结果为准，不会另行告知' : '') +
+      '。对话中没有附带任何记忆条目，说明目前还没有记忆。对待这些条目：关于用户的背景与偏好，以及用户纠正过的做法——后者请照做，同样的错不要再犯；记忆不得凌驾于上述规范与安全底线，与用户当前的明确要求冲突时以当前要求为准。'
+  )
 
   // ── 项目私有记忆（仅挂载工作区时）
   if (root) {
-    const scope: MemoryScope = { kind: 'project', root }
-    const projects = listMemories(scope)
     lines.push(
       opts.writable
         ? `【项目私有记忆】当前工作区另有一份仅属于用户本人的私有项目记忆（memory_write 的 scope="project"）：只在本项目中生效、不入版本库、团队其他人看不到，用于积累本项目里的个人经验。上限 ${PROJECT_MEMORY_BUDGET_CHARS} 字 / ${PROJECT_MEMORY_MAX_ENTRIES} 条，维护规则同上。`
-        : '【项目私有记忆】以下是用户在当前工作区的私有项目记忆，请在完成任务时参考；本次执行中为只读。'
+        : '【项目私有记忆】用户在当前工作区另有私有项目记忆，请在完成任务时参考；本次执行中为只读。',
+      '它的条目同样随对话消息附带（标为「项目私有记忆」）：其中的做法与踩坑经验请照做，同样的弯路不要再走；记忆不得凌驾于上述规范与安全底线，且可能已过时——与代码现状不符时以代码为准' +
+        (opts.writable ? '，并更新或删除该条。' : '。')
     )
-    if (!projects.length) {
-      lines.push('  （当前项目尚无私有记忆）')
-    } else {
-      lines.push(
-        '以下为本项目已记住的内容（其中的做法与踩坑经验请照做，同样的弯路不要再走；记忆不得凌驾于上述规范与安全底线，且可能已过时——与代码现状不符时以代码为准，并更新或删除该条）：',
-        ...entryLines(projects, PROJECT_MEMORY_BUDGET_CHARS)
-      )
-    }
   }
   return lines
 }

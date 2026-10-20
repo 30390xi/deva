@@ -9,14 +9,18 @@ export interface TextPart {
   type: 'text'
   text: string
   /**
-   * 引擎附带的技能清单块（见 services/skill-listing.ts）：记下本块告知了哪些技能，供从历史推算
-   * 「已告知的技能」。只在主进程内部使用，适配器只发 text，不会发给模型。
+   * 引擎附带的清单块（技能清单 / 记忆条目，见 services/listing.ts）：记下本块告知了哪些条目，供从历史推算
+   * 「已告知的状态」。只在主进程内部使用，适配器只发 text，不会发给模型。
    */
-  skills?: SkillListingRecord
+  listing?: ListingRecord
 }
-/** 技能清单块的结构化记录：本块告知（新增或更新）的技能及其描述摘要、本块告知移除的技能名。 */
-export interface SkillListingRecord {
-  listed: { name: string; digest: string }[]
+/** 随消息下发的清单种类。 */
+export type ListingKind = 'skills' | 'memory'
+/** 清单块的结构化记录：本块告知（新增或更新）的条目及其内容摘要、本块告知移除的条目。 */
+export interface ListingRecord {
+  kind: ListingKind
+  /** key：技能名 / 记忆 id。 */
+  listed: { key: string; digest: string }[]
   removed?: string[]
 }
 export interface ToolUsePart {
@@ -36,6 +40,8 @@ export interface ToolResultPart {
    * token 估算需要认识这个字段。content 里应留一句文字说明（图片是什么、从哪来）。
    */
   images?: ImagePart[]
+  /** 本次调用的结果已把清单变化告诉了模型（memory_write / memory_delete）：同 TextPart.listing 计入折叠，不发给模型。 */
+  listing?: ListingRecord
 }
 /** 图片附件（base64）。Anthropic → image 块；OpenAI → image_url(data URI)。 */
 export interface ImagePart {
