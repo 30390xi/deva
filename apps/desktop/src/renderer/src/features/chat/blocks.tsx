@@ -29,7 +29,8 @@ import {
   Brain,
   FolderOpen,
   ListChecks,
-  Package
+  Package,
+  Archive
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ChatBlock, ChatMessage, StreamStatus, ToolStatus } from '../../store/chat'
@@ -202,6 +203,17 @@ export function StatusIndicator({
     )
   }
 
+  // 正在压缩上下文：主进程真实信号（compacting 事件）。压缩可能要几十秒，换掉「思考中」，文字扫光以示区别。
+  if (status.compacting) {
+    return (
+      <div className="chat__status" role="status" aria-live="polite">
+        <span className="chat__status-dot" />
+        <span className="chat__status-shimmer">{t('chat.work.compacting')}…</span>
+        <span className="chat__status-time">{formatElapsed(status.elapsedSec)}</span>
+      </div>
+    )
+  }
+
   // 等待挂载工作区：引导用户去上方卡片点「挂载工作区 / 暂不挂载」。
   if (activity.kind === 'mount') {
     return (
@@ -283,6 +295,37 @@ function ThinkingBlock({ text, done }: { text: string; done: boolean }): React.J
       {open && (
         <div className="msg__think-body">
           <Markdown text={text} muted />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 「已压缩」提示：较早的对话已收成摘要。一行居中提示，摘要正文默认折叠、点开才看——它是写给模型的上下文，
+ * 不该以角色的口吻整段摊在对话里。
+ */
+export function CompactionNotice({ summary }: { summary: string }): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={open ? 'msg__compaction is-open' : 'msg__compaction'}>
+      <button
+        type="button"
+        className="msg__compaction-head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Archive size={13} />
+        <span>{t('chat.notice.compacted')}</span>
+        <span className="msg__compaction-toggle">
+          {open ? t('chat.notice.compactedHide') : t('chat.notice.compactedShow')}
+        </span>
+        <ChevronRight size={13} className="msg__compaction-caret" />
+      </button>
+      {open && (
+        <div className="msg__compaction-body">
+          <Markdown text={summary} muted />
         </div>
       )}
     </div>
@@ -376,13 +419,14 @@ export function BlockView({
   // 步骤边界标记：只服务于重连时丢残缺尾部的判定，不渲染。
   if (block.kind === 'step') return null
 
-  // notice：回合终止说明（截断/空回合）或上下文压缩结果，弱化提示样式，区别于红色错误
+  if (block.kind === 'compaction') return <CompactionNotice summary={block.summary} />
+
+  // notice：回合终止说明（截断/空回合等），弱化提示样式，区别于红色错误
   if (block.kind === 'notice') {
     const NOTICE_KEY: Record<typeof block.code, string> = {
       truncated: 'chat.notice.truncated',
       empty: 'chat.notice.empty',
       refused: 'chat.notice.refused',
-      compacted: 'chat.notice.compacted',
       restored: 'chat.notice.restored',
       aborted: 'chat.notice.aborted'
     }

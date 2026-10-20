@@ -109,6 +109,7 @@ import {
 import {
   AUTO_MARKER,
   compactSession,
+  displaySummary,
   isAutoNudge,
   isCompactionSummary,
   isTaskNotification,
@@ -117,7 +118,6 @@ import {
   needsCompactionMidTurn,
   NOTIFY_MARKER,
   rememberContextLimit,
-  stripMarker,
   type CompactModelConfig,
   type CompactStatus
 } from './compaction'
@@ -289,14 +289,15 @@ type DisplayBlock =
   /** status=running 仅见于仍在后台运行的子智能体 Task 卡（见 backgroundSubagents）。 */
   | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error' | 'running'; summary?: string }
   /**
-   * 弱化提示气泡：compacted=较早历史已压缩（由 messages 里的摘要标记还原）；
-   * truncated=达输出上限被截断 / empty=通篇无回复 / restored=仅回滚了代码 / aborted=用户中止了本轮
-   * （由 StoredNotice 边车还原）。
+   * 弱化提示气泡：truncated=达输出上限被截断 / empty=通篇无回复 / restored=仅回滚了代码 /
+   * aborted=用户中止了本轮（由 StoredNotice 边车还原）。
    */
   | {
       kind: 'notice'
-      code: 'compacted' | 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
+      code: 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
     }
+  /** 较早历史已压缩（由 messages 里的摘要标记还原）：一行提示，摘要正文默认折叠。 */
+  | { kind: 'compaction'; summary: string }
   /** 请求失败红框：由 StoredNotice 边车还原（原样展示错误文案）。 */
   | { kind: 'error'; message: string }
   /** 角色名片：propose_agent 的提议。status 终态（accepted/rejected）由 StoredSession.proposals 边车持久化。 */
@@ -505,16 +506,13 @@ function toDisplayMessages(
 
     // user
 
-    // 压缩摘要（带标记的 user 消息）：Codex 式重开——只呈现「已压缩」提示 + 摘要正文，
+    // 压缩摘要（带标记的 user 消息）：Codex 式重开——只呈现「已压缩」提示 + 折叠的摘要正文，
     // 不重建被压缩掉的早期气泡（与真正发给模型的内容一致）。渲染为一条 assistant 展示消息，
     // 且置 lastAssistant=null（它无工具块、其后紧跟真实用户轮，不会被 tool_result 回填）。
     if (isCompactionSummary(m) && typeof m.content === 'string') {
       out.push({
         role: 'assistant',
-        blocks: [
-          { kind: 'notice', code: 'compacted' },
-          { kind: 'text', text: stripMarker(m.content) }
-        ]
+        blocks: [{ kind: 'compaction', summary: displaySummary(m.content) }]
       })
       lastAssistant = null
       return
@@ -1003,6 +1001,11 @@ export type ChatStreamEvent =
    * status: compacted=已压缩 / none=无需压缩 / failed=失败（历史未动）。
    */
   | { type: 'compacted'; scope: 'auto' | 'manual'; status: CompactStatus; message?: string }
+  /**
+   * 正在压缩上下文（自动、轮中或手动 /compact）：真正开始请求摘要时发 active=true，结束（不论结果）发
+   * active=false，成对出现；无可压的那次不发。渲染层据此把底部状态行换成「正在压缩」。结果另见 compacted。
+   */
+  | { type: 'compacting'; active: boolean }
   /**
    * 某张交互卡（问答 / 计划审阅 / 挂载请求）已被答复——不论答复来自桌面还是远程通道（飞书等）。
    * 同一张卡可能同时显示在多端：先到的答复生效，其余端据此把卡收成已决态，免得留下点了没反应的卡。
@@ -3122,6 +3125,29 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   }
 
   /**
+   * compactSession + 「正在压缩」状态：真正开始请求摘要时发 compacting(active)，结束不论结果补发收尾；
+   * 无可压的那次什么都不发（轮中每步都可能查一次，界面不该跟着闪）。
+   */
+  async function compactWithStatus(
+    turnId: string,
+    sessionId: string,
+    args: Parameters<typeof compactSession>[0]
+  ): ReturnType<typeof compactSession> {
+    let started = false
+    try {
+      return await compactSession({
+        ...args,
+        onStart: () => {
+          started = true
+          emit(turnId, sessionId, { type: 'compacting', active: true })
+        }
+      })
+    } finally {
+      if (started) emit(turnId, sessionId, { type: 'compacting', active: false })
+    }
+  }
+
+  /**
    * 轮中压缩钩子（AgentLoopArgs.compact）：主轮与定时任务共用。compactSession 就地改写
    * session.messages，循环手里的 history 仍有效。
    *  · 无可压（none）静默返回——判定便宜，下一步照常再查；
@@ -3141,7 +3167,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     return async () => {
       if (gaveUp) return false
       try {
-        const r = await compactSession({ session, model, signal: controller.signal, midTurn: true })
+        const r = await compactWithStatus(turnId, sessionId, {
+          session,
+          model,
+          signal: controller.signal,
+          midTurn: true
+        })
         if (r.status === 'none') return false
         if (r.status === 'failed') {
           if (controller.signal.aborted) return false
@@ -3198,7 +3229,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // 失败 / 无需压缩都发事件供渲染层弱提示，且绝不阻断本轮（宁可这一轮不压也要照常回答）。
     if (!controller.signal.aborted && needsCompaction(session, turnModel)) {
       try {
-        const r = await compactSession({ session, model: turnModel, signal: controller.signal })
+        const r = await compactWithStatus(turnId, sessionId, { session, model: turnModel, signal: controller.signal })
         // 失败原因落主进程日志：渲染层虽已展示，但后台回合（定时任务）无人盯着，日志是唯一痕迹。
         if (r.status === 'failed') console.warn('[compaction] 自动压缩失败：', r.message)
         if (r.status !== 'none')
@@ -3471,7 +3502,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // history 已在上面捕获——compactSession 就地改写 messages，这个引用压缩后依然有效。
     if (!controller.signal.aborted && needsCompaction(session, turnModel)) {
       try {
-        const r = await compactSession({ session, model: turnModel, signal: controller.signal })
+        const r = await compactWithStatus(turnId, sessionId, { session, model: turnModel, signal: controller.signal })
         // 失败原因落主进程日志：渲染层虽已展示，但后台回合（定时任务）无人盯着，日志是唯一痕迹。
         if (r.status === 'failed') console.warn('[compaction] 自动压缩失败：', r.message)
         if (r.status !== 'none')
@@ -3664,7 +3695,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         let message: string | undefined
         if (session) {
           // 与 runTurn 同源：按**本对话**模型（快照固定）压缩——窗口与摘要模型都用它，删除则回落 model。
-          const r = await compactSession({
+          const r = await compactWithStatus(turnId, sessionId, {
             session,
             model: resolveModelRef(session.model, model),
             signal: controller.signal

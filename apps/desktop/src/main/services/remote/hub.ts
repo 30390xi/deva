@@ -751,8 +751,14 @@ function onBusEvent({ turnId, sessionId, event }: ChatEventPayload): void {
   if (event.type === 'interaction_resolved') return applyResolution(event)
   if (event.type === 'card_resolved') return applyCardResolution(sessionId, event)
   // 回合开始只为桌面窗口补用户气泡；手机端的回合视图在首个内容事件时建立。
-  // 待办清单状态是会话级的胶囊数据（可能不属于任何回合），手机端不展示。
-  if (event.type === 'usage' || event.type === 'turn_start' || event.type === 'todos') return
+  // 待办清单状态是会话级的胶囊数据（可能不属于任何回合），手机端不展示；「正在压缩」只驱动桌面的状态行。
+  if (
+    event.type === 'usage' ||
+    event.type === 'turn_start' ||
+    event.type === 'todos' ||
+    event.type === 'compacting'
+  )
+    return
   // 后台子智能体的过程不属于任何回合（turnId 为空串），手机端不展示；它结束后的那一轮照常推送。
   if ((event.type === 'tool_call' || event.type === 'tool_result') && event.bg) return
   // 桌面手动 /compact 也走回合事件，但不是一轮对话：不推。

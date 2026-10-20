@@ -145,8 +145,10 @@ export type DisplayBlock =
   | { kind: 'tool'; id: string; name: string; args: unknown; status: 'ok' | 'error' | 'running'; summary?: string }
   | {
       kind: 'notice'
-      code: 'compacted' | 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
+      code: 'truncated' | 'empty' | 'refused' | 'restored' | 'aborted'
     }
+  /** 较早历史已压缩：一行提示，摘要正文（已去掉写给模型的开头）默认折叠。 */
+  | { kind: 'compaction'; summary: string }
   | { kind: 'error'; message: string }
   | { kind: 'agentcard'; id: string; draft: AgentDraft; status: 'pending' | 'accepted' | 'rejected' }
   /**
@@ -707,6 +709,8 @@ export type ChatStreamEvent =
       status: 'compacted' | 'none' | 'failed'
       message?: string
     }
+  /** 正在压缩上下文：开始请求摘要时 active=true，结束（不论结果）active=false，成对出现。 */
+  | { type: 'compacting'; active: boolean }
   /** 某张交互卡已被答复（可能来自手机端）：渲染层据此把同 key 的卡收成已决态。 */
   | {
       type: 'interaction_resolved'

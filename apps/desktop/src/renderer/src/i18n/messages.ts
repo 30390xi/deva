@@ -231,7 +231,9 @@ const zhCN: MessageTree = {
       truncated: '回复多次撞上输出长度上限，自动续写仍未完成，已停下。可发送「继续」，或让我把内容拆小、分段写入文件。',
       empty: '本轮模型没有返回任何内容。可换种说法重试或换个模型；若这轮对话已经很长，也可以新建对话或先压缩上下文。',
       refused: '模型拒绝了本次请求（或被服务商的内容策略拦截），本轮没有返回内容。换种说法或换个模型再试。',
-      compacted: '较早的对话已压缩为摘要，以节省上下文。',
+      compacted: '较早的对话已压缩为摘要',
+      compactedShow: '查看摘要',
+      compactedHide: '收起',
       compactNone: '当前对话较短，无需压缩。',
       compactFailed: '压缩失败，历史保持不变。',
       contextLimitLearned:
@@ -317,6 +319,7 @@ const zhCN: MessageTree = {
     work: {
       thinking: '思考中',
       responding: '生成回答中',
+      compacting: '正在压缩较早的对话',
       usingTool: '正在调用工具',
       subagent: '子智能体运行中',
       awaitingAnswer: '等待你的选择（在上方问答卡选择或输入）',
@@ -1234,7 +1237,9 @@ const en: MessageTree = {
         'The model returned nothing this turn. Try rephrasing or another model; if this chat has grown long, start a new one or compact the context first.',
       refused:
         'The model declined this request (or the provider blocked it by content policy), so nothing came back. Try rephrasing, or switch models.',
-      compacted: 'Earlier conversation was compacted into a summary to save context.',
+      compacted: 'Earlier conversation compacted into a summary',
+      compactedShow: 'Show summary',
+      compactedHide: 'Hide',
       compactNone: 'This conversation is still short — nothing to compact.',
       compactFailed: 'Compaction failed; history is unchanged.',
       contextLimitLearned:
@@ -1316,6 +1321,7 @@ const en: MessageTree = {
     work: {
       thinking: 'Thinking',
       responding: 'Responding',
+      compacting: 'Compacting earlier conversation',
       usingTool: 'Using tool',
       subagent: 'Running subagent',
       awaitingAnswer: 'Waiting for your choice (pick or type in the card above)',
