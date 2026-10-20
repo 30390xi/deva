@@ -309,6 +309,9 @@ const zhCN: MessageTree = {
       title: '调用了 {n} 个工具',
       failed: '{n} 个失败'
     },
+    process: {
+      steps: '已执行 {n} 步'
+    },
     agentcard: {
       title: '角色名片',
       fallback: '未命名角色',
@@ -1310,6 +1313,9 @@ const en: MessageTree = {
     toolGroup: {
       title: '{n} tool calls',
       failed: '{n} failed'
+    },
+    process: {
+      steps: '{n} steps'
     },
     agentcard: {
       title: 'Agent card',

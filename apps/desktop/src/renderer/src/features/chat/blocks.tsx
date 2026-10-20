@@ -1147,6 +1147,96 @@ export function ToolGroupCard({ tools }: { tools: ToolBlock[] }): React.JSX.Elem
   )
 }
 
+/**
+ * 回合结束后也不折进「工作过程」的块：角色 / 任务名片、交付卡、问答 / 计划 / 挂载卡、错误与回合提示，
+ * 以及仍在后台运行的子智能体（要留着停止键）——这些是要用户看到或处理的结果，不是过程。
+ */
+function isPinned(b: ChatBlock): boolean {
+  switch (b.kind) {
+    case 'agentcard':
+    case 'autotaskcard':
+    case 'ask':
+    case 'plan':
+    case 'mount':
+    case 'error':
+    case 'notice':
+    case 'compaction':
+      return true
+    case 'tool':
+      return b.name === 'present_files' && b.status === 'ok'
+    case 'subagent':
+      return Boolean(b.background) && b.status === 'running'
+    default:
+      return false
+  }
+}
+
+/** 算「过程」的块：思考、工具调用、子智能体、已完成的待办清单（固定展示的除外）。 */
+function isProcess(b: ChatBlock): boolean {
+  if (isPinned(b)) return false
+  return b.kind === 'thinking' || b.kind === 'tool' || b.kind === 'subagent' || b.kind === 'todolist'
+}
+
+/**
+ * 已结束回合的过程折叠（纯函数）：最后一个过程块及其之前的非固定块（含夹在中间的正文）收进「工作过程」，
+ * 其后的正文即最终回复；固定块无论位置都留在外面，保持原相对顺序。
+ * 没有过程块，或折叠后外面什么都不剩（如中断在工具调用上）→ null，按原样逐块渲染。
+ */
+export function splitProcess(blocks: ChatBlock[]): { process: ChatBlock[]; visible: ChatBlock[] } | null {
+  let last = -1
+  blocks.forEach((b, i) => {
+    if (isProcess(b)) last = i
+  })
+  if (last < 0) return null
+  const process: ChatBlock[] = []
+  const visible: ChatBlock[] = []
+  blocks.forEach((b, i) => {
+    if (i <= last && !isPinned(b)) process.push(b)
+    else visible.push(b)
+  })
+  const hasVisible = visible.some((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim()))
+  return hasVisible ? { process, visible } : null
+}
+
+/**
+ * 「工作过程」折叠条：默认收起，标题为已执行步数与失败数（只有思考时显示「已思考」）；
+ * 展开后按原顺序渲染过程块（children 由调用方给出，复用其块渲染）。
+ */
+export function ProcessFold({
+  blocks,
+  open,
+  onToggle,
+  children
+}: {
+  blocks: ChatBlock[]
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const calls = blocks.filter((b) => b.kind === 'tool' || b.kind === 'subagent') as (
+    | ToolBlock
+    | Extract<ChatBlock, { kind: 'subagent' }>
+  )[]
+  const failed = calls.filter((b) => b.status === 'error' || b.status === 'denied').length
+  // 标题按步数（工具调用与子智能体各算一步）计，不与展开后工具组卡的「调用了 N 个工具」重复；只有思考时显示「已思考」。
+  const title =
+    calls.length > 0 ? t('chat.process.steps').replace('{n}', String(calls.length)) : t('chat.thought')
+  return (
+    <div className={`msg__process${open ? ' is-open' : ''}`}>
+      <button type="button" className="msg__process-head" aria-expanded={open} onClick={onToggle}>
+        <ChevronRight size={13} className="msg__process-caret" />
+        {/* 失败数与标题同样弱化：过程中的失败多是参数不对、随即重试，不必抢眼；真正的错误由外面的错误块呈现。 */}
+        <span>
+          {title}
+          {failed > 0 && ` · ${t('chat.toolGroup.failed').replace('{n}', String(failed))}`}
+        </span>
+      </button>
+      {open && <div className="msg__process-body">{children}</div>}
+    </div>
+  )
+}
+
 /** 子智能体类型的展示名：分身（fork）按界面语言显示，其余（General / Explore / Research / Plan）原样。 */
 function subagentName(agent: string | undefined, t: (key: string) => string): string {
   if (!agent) return ''

@@ -126,10 +126,12 @@ import { useTheme } from '../theme/ThemeContext'
 import {
   BlockView,
   CompactionNotice,
+  ProcessFold,
   StatusIndicator,
   ToolGroupCard,
   deriveActivity,
-  groupBlocks
+  groupBlocks,
+  splitProcess
 } from '../features/chat/blocks'
 import { ModelSettings } from '../features/settings/ModelSettings'
 import { AvatarEditor } from './AvatarEditor'
@@ -3588,6 +3590,8 @@ function ConvMessage({
   onStopSubagent: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
+  // 已结束回合的「工作过程」是否展开：默认收起，只露最终回复与固定卡片；用户点开后在本次挂载内保持。
+  const [processOpen, setProcessOpen] = useState(false)
   // 后台任务通知（后台子智能体结束后自动起的那一轮的起点）：一行居中的系统通知，不画成用户气泡。
   // 仍保留 is-user + data-turn：它是一轮的起点，右键删轮 / 跳转定位都靠它。
   if (msg.role === 'user' && msg.notify) {
@@ -3631,6 +3635,28 @@ function ConvMessage({
       </div>
     )
   }
+  // 连续 ≥2 个工具调用折叠成一张工具组卡（见 groupBlocks）；其余块逐个原样渲染。
+  // 进行中的回合（active）不折叠，thinkingDone 只在此时有意义；已结束回合的块一律已完成。
+  const renderBlocks = (blocks: ChatBlock[]): React.ReactNode =>
+    groupBlocks(blocks).map((item) =>
+      item.type === 'toolGroup' ? (
+        <ToolGroupCard key={item.key} tools={item.tools} />
+      ) : (
+        <BlockView
+          key={item.index}
+          block={item.block}
+          thinkingDone={!(active && item.index === blocks.length - 1)}
+          onAsk={onAsk}
+          onPlan={onPlan}
+          onMountReq={onMountReq}
+          onOpenProposal={onOpenProposal}
+          onOpenAutotask={onOpenAutotask}
+          onStopSubagent={onStopSubagent}
+        />
+      )
+    )
+  // 回合结束后把思考 / 工具调用等过程收进「工作过程」折叠条，名片、交付卡等固定块与最终回复留在外面（见 splitProcess）。
+  const split = active ? null : splitProcess(msg.blocks)
   return (
     <div className="cf-msg" data-turn={dataTurn}>
       <Avatar persona={owner} size={32} />
@@ -3639,23 +3665,19 @@ function ConvMessage({
           <span className="cf-msg__name">{owner?.name ?? t('cf.assistant')}</span>
         </div>
         <div className="msg__content">
-          {/* 连续 ≥2 个工具调用折叠成一张工具组卡（见 groupBlocks）；其余块逐个原样渲染。 */}
-          {groupBlocks(msg.blocks).map((item) =>
-            item.type === 'toolGroup' ? (
-              <ToolGroupCard key={item.key} tools={item.tools} />
-            ) : (
-              <BlockView
-                key={item.index}
-                block={item.block}
-                thinkingDone={!(active && item.index === msg.blocks.length - 1)}
-                onAsk={onAsk}
-                onPlan={onPlan}
-                onMountReq={onMountReq}
-                onOpenProposal={onOpenProposal}
-                onOpenAutotask={onOpenAutotask}
-                onStopSubagent={onStopSubagent}
-              />
-            )
+          {split ? (
+            <>
+              <ProcessFold
+                blocks={split.process}
+                open={processOpen}
+                onToggle={() => setProcessOpen((v) => !v)}
+              >
+                {renderBlocks(split.process)}
+              </ProcessFold>
+              {renderBlocks(split.visible)}
+            </>
+          ) : (
+            renderBlocks(msg.blocks)
           )}
         </div>
       </div>
