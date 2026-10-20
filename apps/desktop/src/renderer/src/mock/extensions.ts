@@ -22,6 +22,10 @@ export interface Skill {
   trigger: string
   /** 建议工具（frontmatter allowed-tools，仅提示，不参与授权）。 */
   allowedTools: string[]
+  /** 标准 SKILL.md 的可选字段 license / compatibility / metadata（仅展示）。 */
+  license: string
+  compatibility: string
+  metadata: Record<string, string>
   /** 完整操作指令（SKILL.md 正文）。 */
   instructions: string
   scope: ExtScope

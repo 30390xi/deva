@@ -11,7 +11,7 @@ import { listSessions } from './services/chat-store'
 import { sweepCheckpoints } from './services/checkpoints'
 import { sweepSubagents } from './services/subagent-store'
 import { sweepMedia } from './services/media-store'
-import { registerSkillsIpc } from './services/skills'
+import { registerSkillsIpc, startSkillsWatcher } from './services/skills'
 import { ensureSeededPersonas, registerPersonasIpc } from './services/personas'
 import { registerProfileIpc } from './services/profile'
 import { registerMemoryIpc } from './services/memory'
@@ -279,6 +279,7 @@ if (!app.requestSingleInstanceLock()) {
 
   // 技能（Skills，全局 ~/.deva/skills/*/SKILL.md；渐进式披露，启用态入 config.json）
   registerSkillsIpc(() => mainWindow)
+  startSkillsWatcher(() => mainWindow)
 
   // Agent 提示词（Personas，全局 ~/.deva/personas/*.md；已启用者追加进主智能体系统提示词，启用态入 config.json）
   // 首启种子：逐条种入默认角色（Deva / 小码酱 …，见 default-personas.ts），对话优先外壳默认身份；

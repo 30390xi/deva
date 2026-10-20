@@ -1,17 +1,18 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import {
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
-  statSync
+  statSync,
+  watch,
+  type FSWatcher
 } from 'fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { unzipSync } from 'fflate'
 import { getConfig, getDevaHome, setConfig } from './config'
-import { fmArray, fmScalar, fmString, parseFrontmatter } from './frontmatter'
+import { fmArray, fmMap, fmScalar, fmString, parseFrontmatter } from './frontmatter'
 
 /**
  * 技能（Skills）服务：发现 / 解析 / 读写 `~/.deva/skills/<id>/SKILL.md`（全局，与项目无关）。
@@ -29,7 +30,7 @@ import { fmArray, fmScalar, fmString, parseFrontmatter } from './frontmatter'
  * - `loadSkillInstructionsByName()`：命中 `skill` 工具或 `/name` 显式触发时，才加载完整正文。
  *
  * 文件读写不设路径限制：技能目录可被 read_file / write_file / 命令直接读写（多文件技能的子文档按需
- * read_file，安装可下载解压到技能目录）。
+ * read_file，安装可下载解压到技能目录）。技能目录有监听（`startSkillsWatcher`），渲染层的技能清单随之实时更新。
  * `allowed-tools` 只作**建议文本**注入，绝不触碰权限闸门（evaluate）——技能不能借此自我提权。
  */
 
@@ -43,6 +44,10 @@ export interface SkillRecord {
   trigger: string
   /** 建议工具清单（frontmatter allowed-tools，仅作提示注入）。 */
   allowedTools: string[]
+  /** 以下三项为标准 SKILL.md 的可选字段，仅供展示。 */
+  license: string
+  compatibility: string
+  metadata: Record<string, string>
   /** SKILL.md 正文 = 完整操作指令。 */
   instructions: string
   enabled: boolean
@@ -150,6 +155,9 @@ const BUILTIN_CREATE_SKILL: SkillRecord = {
     '引导用户从零创建一个新技能：从用例规划脚本、参考文档、模板等资源，落盘、校验并启用（单文件调 create_skill，多文件直接写进技能目录）。',
   trigger: '输入 /create-skill，或表达「帮我做/创建一个技能」时触发。',
   allowedTools: ['create_skill', 'list_dir', 'write_file', 'read_file', 'run_command'],
+  license: '',
+  compatibility: '',
+  metadata: {},
   instructions: CREATE_SKILL_INSTRUCTIONS,
   enabled: true,
   source: 'builtin'
@@ -185,6 +193,9 @@ const BUILTIN_CREATE_AGENT: SkillRecord = {
   description: '引导用户用对话创建一个新角色：厘清用途、拟定要素、确认后调 propose_agent 生成名片供确认。',
   trigger: '输入 /create-agent，或表达「帮我做/创建一个角色/性格/身份」时触发。',
   allowedTools: ['propose_agent'],
+  license: '',
+  compatibility: '',
+  metadata: {},
   instructions: CREATE_AGENT_INSTRUCTIONS,
   enabled: true,
   source: 'builtin'
@@ -221,6 +232,9 @@ const BUILTIN_CREATE_MCP: SkillRecord = {
   description: '引导用户用对话接入一个 MCP 服务：厘清用途与传输方式、收集要素（密钥仅收字段名）、确认后调 create_mcp 工具落盘并启用。',
   trigger: '输入 /create-mcp，或表达「帮我接入/添加/创建一个 MCP（服务）」时触发。',
   allowedTools: ['create_mcp'],
+  license: '',
+  compatibility: '',
+  metadata: {},
   instructions: CREATE_MCP_INSTRUCTIONS,
   enabled: true,
   source: 'builtin'
@@ -296,6 +310,9 @@ function parseSkill(id: string, raw: string, enabled: boolean): SkillRecord {
     description: fmString(data, 'description'),
     trigger: fmString(data, 'trigger'),
     allowedTools: fmArray(data, 'allowed-tools'),
+    license: fmString(data, 'license'),
+    compatibility: fmString(data, 'compatibility'),
+    metadata: fmMap(data, 'metadata'),
     instructions: body.trim(),
     enabled,
     source: 'custom'
@@ -400,25 +417,36 @@ export function upsertSkill(input: SkillUpsertInput): SkillRecord {
     description: (input.description ?? '').trim(),
     trigger: (input.trigger ?? '').trim(),
     allowedTools: input.allowedTools ?? [],
+    license: '',
+    compatibility: '',
+    metadata: {},
     instructions: input.instructions ?? '',
     enabled: input.enabled !== false,
     source: 'custom'
   }
 }
 
-export function deleteSkill(id: string): void {
-  if (RESERVED_IDS.has(id)) return // 内置不可删
-  if (!isSafeId(id)) return
-  try {
-    rmSync(join(skillsDir(), id), { recursive: true, force: true })
-  } catch {
-    /* 忽略删除失败 */
+/**
+ * 删除技能：整个文件夹移到系统回收站（技能常带用户自己写的脚本与资料，误删可还原）。
+ * 文件夹已不在（如在外部手动删掉）视为成功；移入回收站失败则不动启用态，返回 ok:false。
+ */
+export async function deleteSkill(id: string): Promise<{ ok: boolean }> {
+  if (RESERVED_IDS.has(id)) return { ok: false } // 内置不可删
+  if (!isSafeId(id)) return { ok: false }
+  const folder = join(skillsDir(), id)
+  if (existsSync(folder)) {
+    try {
+      await shell.trashItem(folder)
+    } catch {
+      return { ok: false }
+    }
   }
   const map = enabledMap()
   if (id in map) {
     delete map[id]
     writeEnabledMap(map)
   }
+  return { ok: true }
 }
 
 export function setSkillEnabled(id: string, enabled: boolean): void {
@@ -575,14 +603,121 @@ export function importSkillFromFile(filePath: string): SkillImportResult {
   }
 }
 
+// ── 目录监听（技能装上 / 删掉 / 改了即推送渲染层）──────────────────────────────
+
+/** 一串文件事件（如解压技能包）合并成一次重读的防抖时长。 */
+const WATCH_DEBOUNCE_MS = 300
+
+/**
+ * 只有影响技能清单的变化才重读：技能目录下一级条目增删改名，或某个 `<id>/SKILL.md` 变化。
+ * 技能里的 scripts / assets 等改动不影响清单，忽略。filename 为空 = 事件缓冲溢出、细节丢失
+ * （瞬间写入大量文件时会出现），只能当作有变化。
+ */
+function affectsList(filename: string | null): boolean {
+  if (!filename) return true
+  const parts = filename.split(/[\\/]/)
+  return parts.length === 1 || (parts.length === 2 && parts[1].toLowerCase() === 'skill.md')
+}
+
+/**
+ * 监听技能目录，技能经任何途径变化（对话 create_skill、模型下载解压、手动拷入、外部删除…）后
+ * 防抖重读，向渲染层推送 `skills:changed`（全表），输入框的 / 联想与扩展页随之更新。
+ * 主进程运行期（chat.ts）本来就每次现读磁盘，不依赖这里。
+ *
+ * - 先建好技能目录再监听，绝不退而监听上级目录（否则无关文件事件会频繁唤醒进程）。
+ * - Windows / macOS：系统原生递归监听，只持有技能目录一个句柄（不妨碍把技能子文件夹移进回收站）。
+ * - 其余平台（Linux）：Node 的递归监听会给每个文件各挂一个 inotify 监听，技能里带大目录时代价大；
+ *   改为监听技能目录 + 各技能第一层文件夹（SKILL.md 所在层），数量 = 技能数 + 1。
+ * - 监听出错即整体关闭，退回扩展页进入时重拉的兜底。
+ */
+export function startSkillsWatcher(getWindow: () => BrowserWindow | null): void {
+  const root = skillsDir()
+  try {
+    mkdirSync(root, { recursive: true })
+  } catch {
+    return
+  }
+
+  let timer: NodeJS.Timeout | null = null
+  const schedule = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      getWindow()?.webContents.send('skills:changed', listSkills())
+    }, WATCH_DEBOUNCE_MS)
+  }
+
+  const watchers = new Map<string, FSWatcher>()
+  const stopAll = (err: unknown): void => {
+    console.warn('[skills] 技能目录监听已停止：', err)
+    for (const w of watchers.values()) w.close()
+    watchers.clear()
+  }
+  const add = (key: string, w: FSWatcher): void => {
+    w.on('error', stopAll)
+    watchers.set(key, w)
+  }
+
+  try {
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      add(
+        root,
+        watch(root, { recursive: true, persistent: false }, (_e, f) => {
+          if (affectsList(f)) schedule()
+        })
+      )
+      return
+    }
+
+    // 各技能第一层文件夹的监听与磁盘对齐：新出现的补上，已消失的关掉。
+    const syncChildren = (): void => {
+      let names: string[] = []
+      try {
+        names = readdirSync(root, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && isSafeId(d.name))
+          .map((d) => d.name)
+      } catch {
+        /* 读失败：本轮不调整 */
+      }
+      const live = new Set(names)
+      for (const [key, w] of watchers) {
+        if (key !== root && !live.has(key)) {
+          w.close()
+          watchers.delete(key)
+        }
+      }
+      for (const id of names) {
+        if (watchers.has(id)) continue
+        try {
+          add(
+            id,
+            watch(join(root, id), { persistent: false }, (_e, f) => {
+              if (affectsList(f ? join(id, f) : null)) schedule()
+            })
+          )
+        } catch {
+          /* 文件夹刚被删：下次对齐时自然跳过 */
+        }
+      }
+    }
+    add(
+      root,
+      watch(root, { persistent: false }, () => {
+        syncChildren()
+        schedule()
+      })
+    )
+    syncChildren()
+  } catch (err) {
+    stopAll(err)
+  }
+}
+
 /** 技能读写 IPC（全局；启用态入 config.json）。 */
 export function registerSkillsIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('skills:list', (): SkillRecord[] => listSkills())
   ipcMain.handle('skills:get', (_e, id: string): SkillRecord | null => getSkill(id))
-  ipcMain.handle('skills:remove', (_e, id: string): { ok: true } => {
-    deleteSkill(id)
-    return { ok: true }
-  })
+  ipcMain.handle('skills:remove', (_e, id: string): Promise<{ ok: boolean }> => deleteSkill(id))
   ipcMain.handle('skills:set-enabled', (_e, id: string, enabled: boolean): { ok: true } => {
     setSkillEnabled(id, Boolean(enabled))
     return { ok: true }

@@ -129,10 +129,13 @@ const zhCN: MessageTree = {
     enable: '启用',
     name: '名称',
     description: '描述',
-    instructions: '技能指令',
+    instructions: 'Skill 说明',
     trigger: '触发方式',
     triggerHint: '在对话中输入以下命令即可手动激活：',
     allowedTools: '建议工具',
+    compatibility: '运行环境要求',
+    license: '许可',
+    properties: '属性',
     transport: '传输方式',
     command: '启动命令',
     commandPlaceholder: '如 npx、node、python…',
@@ -999,7 +1002,10 @@ const zhCN: MessageTree = {
     kindSkill: '技能',
     kindMcp: 'MCP',
     builtin: '内置',
-    mcpDeleteConfirm: '确定删除该 MCP 服务？此操作不可撤销。'
+    mcpDeleteConfirm: '确定删除该 MCP 服务？此操作不可撤销。',
+    skillDeleteConfirm: '技能文件夹（含其中的脚本与资料）将移到回收站，可从回收站还原。',
+    skillDeleteConfirmMac: '技能文件夹（含其中的脚本与资料）将移到废纸篓，可从废纸篓还原。',
+    skillDeleteFailed: '删除失败：技能文件夹可能正被占用，可稍后重试或在文件夹中手动删除。'
   }
 }
 
@@ -1128,6 +1134,9 @@ const en: MessageTree = {
     trigger: 'Trigger',
     triggerHint: 'Type this command in chat to activate manually:',
     allowedTools: 'Suggested tools',
+    compatibility: 'Requirements',
+    license: 'License',
+    properties: 'Properties',
     transport: 'Transport',
     command: 'Command',
     commandPlaceholder: 'e.g. npx, node, python…',
@@ -2006,7 +2015,13 @@ const en: MessageTree = {
     kindSkill: 'Skill',
     kindMcp: 'MCP',
     builtin: 'Built-in',
-    mcpDeleteConfirm: 'Delete this MCP server? This cannot be undone.'
+    mcpDeleteConfirm: 'Delete this MCP server? This cannot be undone.',
+    skillDeleteConfirm:
+      'The skill folder, including its scripts and files, will be moved to the Recycle Bin, where you can restore it.',
+    skillDeleteConfirmMac:
+      'The skill folder, including its scripts and files, will be moved to the Trash, where you can restore it.',
+    skillDeleteFailed:
+      'Could not delete the skill. The folder may be in use; try again later or delete it manually.'
   }
 }
 

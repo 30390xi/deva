@@ -312,6 +312,9 @@ export interface SkillRecord {
   description: string
   trigger: string
   allowedTools: string[]
+  license: string
+  compatibility: string
+  metadata: Record<string, string>
   instructions: string
   enabled: boolean
   /** 来源：`builtin` = 应用内置（不可删/编辑、恒启用）；`custom` = 用户创建/导入。 */
@@ -822,9 +825,16 @@ const api = {
     list: (): Promise<SkillRecord[]> => ipcRenderer.invoke('skills:list'),
     get: (id: string): Promise<SkillRecord | null> => ipcRenderer.invoke('skills:get', id),
     import: (): Promise<SkillImportResult> => ipcRenderer.invoke('skills:import'),
-    remove: (id: string): Promise<{ ok: true }> => ipcRenderer.invoke('skills:remove', id),
+    /** 删除 = 技能文件夹移到系统回收站；ok:false 表示未能移入，技能原样保留。 */
+    remove: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('skills:remove', id),
     setEnabled: (id: string, enabled: boolean): Promise<{ ok: true }> =>
-      ipcRenderer.invoke('skills:set-enabled', id, enabled)
+      ipcRenderer.invoke('skills:set-enabled', id, enabled),
+    /** 订阅 skills:changed（技能目录变化后推送的全表），返回取消订阅函数（仿 tasks.onChanged）。 */
+    onChanged: (cb: (skills: SkillRecord[]) => void): (() => void) => {
+      const listener = (_e: unknown, skills: SkillRecord[]): void => cb(skills)
+      ipcRenderer.on('skills:changed', listener)
+      return () => ipcRenderer.removeListener('skills:changed', listener)
+    }
   },
   /** 本机用户资料（个人资料面板）：头像 spec 存 config.json，图片另存 ~/.deva/profile/。 */
   profile: {

@@ -56,7 +56,7 @@ import { UpdateSection } from './UpdateSection'
 // 关于页的应用图标：直接用安装包图标的源文件，图形只维护一份
 import devaIcon from '../../../../build/icon.svg'
 import './redesign.css'
-import type { McpKV, McpServer, McpStatus, Persona } from '../mock/extensions'
+import type { McpKV, McpServer, McpStatus, Persona, Skill } from '../mock/extensions'
 import type {
   EffortLevel,
   GitBranch as GitBranchEntry,
@@ -76,6 +76,7 @@ import { TaskModelSelect, TaskPersonaSelect } from '../features/chat/TaskPickers
 import { taskErrorKey } from '../features/chat/TaskConfirmCard'
 import { TodoCapsule } from '../features/chat/Todos'
 import { ModelSetupCard } from '../features/chat/ModelSetupCard'
+import { Markdown } from '../features/chat/Markdown'
 import {
   useChat,
   type AgentDraft,
@@ -4703,19 +4704,23 @@ function ExtensionsPane(): React.JSX.Element {
   // 角色（persona）不在此列出：它有专属的「角色」tab 与资料卡来管理，扩展页只管技能 / MCP。
   // 子智能体亦不在此列：它是内置能力（通用 / Explore / Research / Plan），不可配置，见 main/services/subagents.ts。
   const { skills, mcp, toggle, refresh } = useExtensions()
-  // 进入扩展页即从磁盘重拉最新：技能可能经对话 create_skill、上传或直接改盘在别处新增，Provider 仅在
-  // 应用启动时载入一次，故此处显式刷新，避免必须重启才能看到新技能。refresh 标识稳定，不会形成刷新循环。
+  // 进入扩展页即从磁盘重拉最新：技能平时由主进程目录监听实时推送，这里兜底监听失效（如技能目录在网络盘）
+  // 并顺带刷新 MCP。refresh 标识稳定，不会形成刷新循环。
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  // 钻取导航：选中某个 MCP 服务 → 进入详情编辑（对齐模型设置页的主从抽屉）。技能只读，故只有 MCP 行
-  // 可点开。MCP 的新增经对话工具 / 直接改盘 ~/.deva/mcp.json，扩展页不放新增入口。
-  const [openMcpId, setOpenMcpId] = useState<string | null>(null)
-  const openMcp = openMcpId ? mcp.find((m) => m.id === openMcpId) : undefined
+  // 钻取导航：点开某行 → 进入详情（对齐模型设置页的主从抽屉）。MCP 详情可编辑；技能详情只读，
+  // 只提供删除与启停；内置技能不展示详情。新增经对话工具 / 上传 / 直接改盘，扩展页不放新增入口。
+  const [open, setOpen] = useState<{ kind: 'skill' | 'mcp'; id: string } | null>(null)
+  const openMcp = open?.kind === 'mcp' ? mcp.find((m) => m.id === open.id) : undefined
+  const openSkill = open?.kind === 'skill' ? skills.find((s) => s.id === open.id) : undefined
 
   if (openMcp) {
-    return <McpEditor item={openMcp} onBack={() => setOpenMcpId(null)} />
+    return <McpEditor item={openMcp} onBack={() => setOpen(null)} />
+  }
+  if (openSkill) {
+    return <SkillDetail item={openSkill} onBack={() => setOpen(null)} />
   }
 
   type Item = {
@@ -4761,44 +4766,128 @@ function ExtensionsPane(): React.JSX.Element {
         <div className="cf-empty">{t('cf.extEmpty')}</div>
       ) : (
         <div className="cf-rows">
-          {items.map((x) =>
-            x.kind === 'mcp' ? (
-              // MCP 行可点开编辑：主区做按钮（点开详情），开关作兄弟节点独立触发（互不干扰）。
-              <div key={`${x.kind}:${x.id}`} className="cf-setrow">
-                <button
-                  className="cf-setrow__open"
-                  title={t('extensions.name')}
-                  onClick={() => setOpenMcpId(x.id)}
-                >
-                  <span className="cf-setrow__name">
-                    {x.name}
-                    <span className="cf-badge">{x.badge}</span>
-                    {x.note && (
-                      <span className={`cf-setrow__note${x.noteWarn ? ' cf-setrow__note--warn' : ''}`}>
-                        {x.note}
-                      </span>
-                    )}
+          {items.map((x) => {
+            const name = (
+              <span className="cf-setrow__name">
+                {x.name}
+                <span className="cf-badge">{x.badge}</span>
+                {x.note && (
+                  <span className={`cf-setrow__note${x.noteWarn ? ' cf-setrow__note--warn' : ''}`}>
+                    {x.note}
                   </span>
-                  <ChevronRight className="cf-setrow__chevron" size={15} />
-                </button>
-                <Toggle on={x.enabled} onChange={() => toggle(x.kind, x.id)} />
-              </div>
-            ) : (
+                )}
+              </span>
+            )
+            return (
               <div key={`${x.kind}:${x.id}`} className="cf-setrow">
-                <div className="cf-setrow__main">
-                  <div className="cf-setrow__name">
-                    {x.name}
-                    <span className="cf-badge">{x.badge}</span>
-                    {x.note && <span className="cf-setrow__note">{x.note}</span>}
-                  </div>
-                </div>
+                {x.locked ? (
+                  // 内置技能不展示详情：只读一行，开关禁用。
+                  <div className="cf-setrow__main">{name}</div>
+                ) : (
+                  // 主区做按钮（点开详情），开关作兄弟节点独立触发（互不干扰）。
+                  <button className="cf-setrow__open" onClick={() => setOpen({ kind: x.kind, id: x.id })}>
+                    {name}
+                    <ChevronRight className="cf-setrow__chevron" size={15} />
+                  </button>
+                )}
                 <Toggle on={x.enabled} disabled={x.locked} onChange={() => toggle(x.kind, x.id)} />
               </div>
             )
-          )}
+          })}
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * 技能详情（对话优先外壳）：只读的钻取式主从抽屉，顶栏形态同 MCP 详情（返回 · 删除 · 启用）。
+ * 只展示标准 SKILL.md 字段（name / description / compatibility / license / metadata）与 SKILL.md 正文，
+ * allowed-tools 及 Deva 自有的 trigger 不显示，空字段整块隐藏。整页撑满设置面板、不出外层滚动条：
+ * 描述不加标题、只占一行，正文吃掉剩余高度、过长时框内滚动。删除 = 技能文件夹移到系统回收站。
+ * 仅自定义技能可进入；内置技能在列表里不可点开。
+ */
+function SkillDetail({ item, onBack }: { item: Skill; onBack: () => void }): React.JSX.Element {
+  const { t, locale } = useI18n()
+  const dialog = useDialog()
+  const toast = useToast()
+  const { toggle, removeSkill } = useExtensions()
+  // 运行环境要求 / 许可 / metadata 合成一张单行键值表，保证整页不出现外层滚动条。
+  const props: Array<[string, string]> = []
+  if (item.compatibility) props.push([t('extensions.compatibility'), item.compatibility])
+  if (item.license) props.push([t('extensions.license'), item.license])
+  props.push(...Object.entries(item.metadata))
+
+  const onDelete = (): void => {
+    const name = clipName(item.name)
+    void (async () => {
+      const ok = await dialog.confirm({
+        title: locale === 'en' ? `Delete skill “${name}”?` : `删除技能 ${name} ？`,
+        message: t(IS_MAC ? 'cf.skillDeleteConfirmMac' : 'cf.skillDeleteConfirm'),
+        confirmText: t('cf.delete'),
+        variant: 'danger'
+      })
+      if (!ok) return
+      if (await removeSkill(item.id)) onBack()
+      else toast.show({ variant: 'error', message: t('cf.skillDeleteFailed') })
+    })()
+  }
+
+  return (
+    <section className="provider-detail provider-detail--fill" key={item.id}>
+      <div className="provider-detail__topbar">
+        <button className="provider-detail__back" onClick={onBack}>
+          <ChevronLeft size={16} />
+          {t('common.back')}
+        </button>
+        <div className="provider-detail__spacer" />
+        <button className="icon-btn provider-detail__del" title={t('extensions.remove')} onClick={onDelete}>
+          <Trash2 size={15} />
+        </button>
+        <span className="provider-detail__enable">{t('extensions.enable')}</span>
+        <Toggle on={item.enabled} onChange={() => toggle('skill', item.id)} />
+      </div>
+      <header className="provider-detail__head">
+        <span className="ext-detail__icon">
+          <Puzzle size={18} />
+        </span>
+        <h2 className="ext-detail__name ext-detail__name--mono">{item.name}</h2>
+        <span className="ext-detail__scope">{t('common.global')}</span>
+      </header>
+
+      {item.desc && (
+        <div className="ext-field ext-detail__desc">
+          <p className="ext-detail__text ext-detail__text--line" title={item.desc}>
+            {item.desc}
+          </p>
+        </div>
+      )}
+
+      {props.length > 0 && (
+        <div className="ext-field">
+          <label className="ext-field__label">{t('extensions.properties')}</label>
+          <dl className="ext-meta">
+            {props.map(([k, v], i) => (
+              <Fragment key={i}>
+                <dt>{k}</dt>
+                <dd title={v}>{v}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </div>
+      )}
+
+      <div className="ext-field ext-field--grow">
+        <label className="ext-field__label">{t('extensions.instructions')}</label>
+        {item.instructions ? (
+          <div className="ext-detail__md">
+            <Markdown text={item.instructions} />
+          </div>
+        ) : (
+          <span className="ext-detail__muted">{t('extensions.instructionsEmpty')}</span>
+        )}
+      </div>
+    </section>
   )
 }
 

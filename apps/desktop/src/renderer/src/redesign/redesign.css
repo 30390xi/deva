@@ -2339,7 +2339,7 @@ body.cf-resizing-y * {
 .cf-setrow__main {
   min-width: 0;
 }
-/* 可点开编辑的行（MCP）：主区做透明按钮，铺满行宽，右侧陈列 chevron 暗示可钻取 */
+/* 可点开详情的行（自定义技能 / MCP）：主区做透明按钮，铺满行宽，右侧陈列 chevron 暗示可钻取 */
 .cf-setrow__open {
   flex: 1 1 auto;
   min-width: 0;

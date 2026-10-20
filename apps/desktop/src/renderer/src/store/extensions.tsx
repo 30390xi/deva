@@ -48,9 +48,8 @@ interface ExtensionsContextValue {
   personas: Persona[]
   selected: Selection | null
   /**
-   * 重新从磁盘拉取全部扩展清单。Provider 仅在挂载时载入一次，而技能等可能经对话 create_skill 工具、
-   * 上传或直接改盘在别处新增 —— 进入扩展页时调用本方法即可拿到最新，无需重启。标识稳定（可安全用作
-   * effect 依赖），故不会触发刷新循环。
+   * 重新从磁盘拉取全部扩展清单。技能已由主进程目录监听实时推送，这里是兜底（监听失效时）并顺带刷新
+   * MCP / 角色 —— 进入扩展页时调用。标识稳定（可安全用作 effect 依赖），故不会触发刷新循环。
    */
   refresh: () => void
   select: (kind: ExtKind, id: string) => void
@@ -76,6 +75,11 @@ interface ExtensionsContextValue {
   setPersonaAvatarImage: (id: string, dataUri: string) => Promise<string>
   /** 技能：上传文件（.zip 技能包或单个 SKILL.md）导入并自动启用；失败弹出本地化提示。 */
   importSkill: () => void
+  /**
+   * 技能：删除（文件夹移到系统回收站）。等主进程结果，成功才从列表移除；返回是否已删，
+   * 失败由调用方提示（技能原样保留）。
+   */
+  removeSkill: (id: string) => Promise<boolean>
   /** MCP：连接失败后手动重试（状态经 onStatus 广播回流）。启用即连接，无单独的连 / 断入口。 */
   mcpRetry: (id: string) => void
   /** MCP：写入某密钥字段（空串即删除）；返回是否成功与加密是否可用（供降级提示）。 */
@@ -92,6 +96,9 @@ function recToSkill(rec: SkillRecord): Skill {
     desc: rec.description,
     trigger: rec.trigger,
     allowedTools: rec.allowedTools,
+    license: rec.license ?? '',
+    compatibility: rec.compatibility ?? '',
+    metadata: rec.metadata ?? {},
     instructions: rec.instructions,
     scope: 'global',
     source: rec.source ?? 'custom',
@@ -225,9 +232,11 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
   const mcpRef = useRef<McpServer[]>(mcp)
   mcpRef.current = mcp
 
-  // 挂载：从磁盘载入技能。
+  // 挂载：从磁盘载入技能，并订阅主进程的技能目录监听——技能经任何途径装上 / 删掉 / 改了，
+  // 都会推来最新全表（输入框的 / 联想与上色、扩展页随之更新，无需重启）。
   useEffect(() => {
     let alive = true
+    const off = window.deva?.skills?.onChanged?.((list) => setSkills(list.map(recToSkill)))
     void window.deva?.skills
       ?.list()
       .then((list) => {
@@ -238,6 +247,7 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
       })
     return () => {
       alive = false
+      off?.()
     }
   }, [])
 
@@ -373,6 +383,17 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
       })()
     }
 
+    // 不做乐观移除：移入回收站可能失败（如文件被占用），失败时列表须保持原样。
+    const removeSkill = async (id: string): Promise<boolean> => {
+      // 内置技能不可删（纵深防御：UI 已隐藏删除入口）。
+      if (skills.find((s) => s.id === id)?.source === 'builtin') return false
+      const res = await window.deva?.skills?.remove(id).catch(() => undefined)
+      if (!res?.ok) return false
+      setSkills((list) => list.filter((s) => s.id !== id))
+      setSelected((cur) => (cur && cur.kind === 'skill' && cur.id === id ? null : cur))
+      return true
+    }
+
     const addMcp = (): void => {
       void (async () => {
         const cfg = await window.deva?.mcp?.upsert({
@@ -490,12 +511,13 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
         }
       },
       remove: (kind, id) => {
-        // 内置技能不可删（纵深防御：UI 已隐藏删除入口）。
-        if (kind === 'skill' && skills.find((s) => s.id === id)?.source === 'builtin') return
+        if (kind === 'skill') {
+          void removeSkill(id)
+          return
+        }
         setterFor(kind)((list) => list.filter((it) => it.id !== id))
         setSelected((cur) => (cur && cur.kind === kind && cur.id === id ? null : cur))
-        if (kind === 'skill') void window.deva?.skills?.remove(id).catch(() => {})
-        else if (kind === 'mcp') void window.deva?.mcp?.remove(id).catch(() => {})
+        if (kind === 'mcp') void window.deva?.mcp?.remove(id).catch(() => {})
         else void window.deva?.personas?.remove(id).catch(() => {})
       },
       add: (kind) => {
@@ -508,6 +530,7 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
       reorderPersonas,
       setPersonaAvatarImage,
       importSkill,
+      removeSkill,
       mcpRetry: (id) => void window.deva?.mcp?.retry(id).catch(() => {}),
       mcpSetSecret: async (id, field, value) => {
         try {
