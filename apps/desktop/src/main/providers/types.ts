@@ -8,6 +8,16 @@
 export interface TextPart {
   type: 'text'
   text: string
+  /**
+   * 引擎附带的技能清单块（见 services/skill-listing.ts）：记下本块告知了哪些技能，供从历史推算
+   * 「已告知的技能」。只在主进程内部使用，适配器只发 text，不会发给模型。
+   */
+  skills?: SkillListingRecord
+}
+/** 技能清单块的结构化记录：本块告知（新增或更新）的技能及其描述摘要、本块告知移除的技能名。 */
+export interface SkillListingRecord {
+  listed: { name: string; digest: string }[]
+  removed?: string[]
 }
 export interface ToolUsePart {
   type: 'tool_use'

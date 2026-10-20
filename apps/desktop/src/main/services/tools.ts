@@ -246,7 +246,7 @@ export const toolSpecs: ToolSpec[] = [
         },
         description: {
           type: 'string',
-          description: '一句话说明「何时该用这个技能」，会进入系统提示词，务必精准。'
+          description: '一句话说明「何时该用这个技能」，会进入模型看到的技能清单，务必精准。'
         },
         trigger: { type: 'string', description: '触发方式的自由文本说明（可选）。' },
         allowedTools: {

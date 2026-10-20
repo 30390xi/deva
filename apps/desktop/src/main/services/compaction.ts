@@ -319,6 +319,8 @@ export function buildTranscript(
     }
     for (const p of m.content) {
       if (p.type === 'text') {
+        // 技能清单块不进转录：它不是对话内容，被摘要掉后引擎会按需重新附上（见 skill-listing.ts）。
+        if (p.skills) continue
         if (p.text.trim()) lines.push(`${label}: ${p.text}`)
       } else if (p.type === 'tool_use') {
         const args = clip(JSON.stringify(p.input ?? {}), MAX_TOOL_ARGS_CHARS)

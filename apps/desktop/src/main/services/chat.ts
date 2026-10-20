@@ -26,6 +26,7 @@ import {
   type ToolResult
 } from './tools'
 import { enabledSkillSummaries, loadSkillInstructionsByName, skillsDir } from './skills'
+import { attachSkillListing } from './skill-listing'
 import { listMemories, memoryPromptSection } from './memory'
 import { loadProjectDoc, projectDocPromptSection } from './project-doc'
 import {
@@ -1439,7 +1440,6 @@ export function getChatRuntime(): ChatRuntime | null {
  */
 function systemPrompt(
   workspaceRoot: string | null,
-  skills: { name: string; description: string }[] = [],
   personas: { name: string; prompt: string }[] = [],
   memory: string[] = [],
   projectDoc: string[] = []
@@ -1466,14 +1466,12 @@ function systemPrompt(
     '【计划先行】遇到非平凡的实现类任务（新功能、跨多文件改动、有多个各有取舍的方案、或需求尚不明确等），先用只读工具（read_file / list_dir / glob / grep / web_fetch）充分调研理解现状——调研面较大时（要翻多个目录、追多条调用链、或需摸清一整套既有约定）可先用 `run_subagent` 派发 `Plan` 子智能体在隔离上下文里完成调研并带回方案要点，再由你综合判断——然后调用 `exit_plan` 提交一份面向用户批准的完整实施计划（Markdown）；**在计划获批前不要写入文件或执行命令**。提交前若仍有影响方案的未决问题（包括 Plan 子智能体标注的不确定项），先用 ask_user 问清，得到答复后再提交；计划里不得留有待用户回答的问题，确需假设的写成「默认采用 X」，也不要用 ask_user 询问「计划是否可行」。用户批准后你直接按计划执行、无需再次征求授权；用户若选择继续完善，请依其回复（随结果附上，或在用户下一条消息里）回应、需要时调整后再重新提交，在收到回复前不要重复调用 exit_plan；用户若忽略计划，不要执行也不要重新提交。琐碎、单点、只读或答疑类任务直接做，不必先出计划。',
     '【任务清单】执行需要 3 步及以上的任务时（尤其是计划获批后开始执行、或用户一次交代了多件事），先用 `todo_write` 列出待办清单，界面会在输入框上方以进度胶囊实时显示给用户；执行中持续更新：同一时刻只保留一项 in_progress，做完一项立即标为 completed，发现新步骤随时补进清单。每次调用传完整清单。任务被暂停、用户转向别的事而不再进行当前清单时，调用 todo_write 传 cancel: true 取消它。单步、琐碎或纯答疑的任务不要建清单。'
   ]
-  if (skills.length) {
-    // 渐进式披露：此处只列「名称 + 一句话描述」；当任务匹配时，模型再调用 skill 工具取完整指令。
-    lines.push(
-      '【技能 Skills】当用户任务匹配下列某项技能时，先调用 `skill` 工具并传入其名称（name）获取该技能的完整操作指令，然后严格据此执行；用户也可用「/技能名」显式触发。',
-      ...skills.map((s) => `  - ${s.name}${s.description ? `：${s.description}` : ''}`),
-      `每个技能是技能目录（${skillsRoot}）下的一个文件夹，入口为 SKILL.md（frontmatter 含 name、description），可附带参考文档/脚本。加载技能时结果会给出该文件夹的绝对路径——正文里的相对路径以它为基准，按需用 read_file 读取。用户要安装或编写多文件技能时，直接在技能目录下建文件夹写入（或下载解压到该处）即可，落盘即自动启用，下一轮起进入上面的清单。`
-    )
-  }
+  // 渐进式披露：清单只有「名称 + 一句话描述」，任务匹配时模型再调用 skill 工具取完整指令。
+  // 清单本身不写在这里而是随消息下发（见 skill-listing.ts）：装 / 删 / 改技能不改本段，提示缓存前缀稳定。
+  lines.push(
+    '【技能 Skills】可用技能的清单不在此处列出，而是由系统随对话消息附带：「【可用技能】」给出完整清单，之后有新增、更新或移除时以「【技能清单更新】」告知，以最近的告知为准。当用户任务匹配其中某项技能时，先调用 `skill` 工具并传入其名称（name）获取该技能的完整操作指令，然后严格据此执行；用户也可用「/技能名」显式触发。',
+    `每个技能是技能目录（${skillsRoot}）下的一个文件夹，入口为 SKILL.md（frontmatter 含 name、description），可附带参考文档/脚本。加载技能时结果会给出该文件夹的绝对路径——正文里的相对路径以它为基准，按需用 read_file 读取。用户要安装或编写多文件技能时，直接在技能目录下建文件夹写入（或下载解压到该处）即可，落盘即自动启用，系统随后会告知它已可用。`
+  )
   // 项目说明（工作区根的 AGENTS.md，轮开头快照，见 project-doc.ts）：跟在规范之后——其前言以「上述规范」
   // 为界声明不得凌驾；与记忆一样是数据，与身份/风格无关，故同在角色设定之前。
   lines.push(...projectDoc)
@@ -1526,19 +1524,19 @@ function sealedSystemPrompt(
   return lines.join('\n')
 }
 
-/** 据已启用技能动态构建 skill 工具规格（无启用技能时返回 null，不向模型暴露）。 */
-function buildSkillTool(skills: { name: string; description: string }[]): ToolSpec | null {
-  if (!skills.length) return null
-  const list = skills.map((s) => `${s.name}${s.description ? `（${s.description}）` : ''}`).join('；')
+/**
+ * skill 工具规格。描述写死、不含清单（清单随消息下发，见 skill-listing.ts），且**恒提供**（内置技能恒在）：
+ * 工具表排在提示缓存前缀的最前面，技能增减若改动它，整段历史的缓存都会失效。
+ */
+function buildSkillTool(): ToolSpec {
   return {
     name: 'skill',
     description:
-      '加载并应用一个已启用「技能（Skill）」的完整操作指令。当用户任务匹配某技能时，调用本工具并传入其名称（name），即可获得该技能的详细步骤/规范，然后严格据此完成任务。' +
-      `当前可用技能：${list}。`,
+      '加载并应用一个已启用「技能（Skill）」的完整操作指令。可用技能由系统随对话消息附带（「【可用技能】」清单及其后的「【技能清单更新】」，以最近的告知为准）。当用户任务匹配某技能时，调用本工具并传入其名称（name），即可获得该技能的详细步骤/规范，然后严格据此完成任务。',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '要加载的技能名称（须为上述可用技能之一）。' }
+        name: { type: 'string', description: '要加载的技能名称（须为系统告知的可用技能之一）。' }
       },
       required: ['name']
     }
@@ -1684,11 +1682,11 @@ function buildSubagentTools(def: SubagentDef): ToolSpec[] {
  * - 内置工具剔除交互/创建类（ask_user 无人应答；run_subagent 无法在无人值守下监管；
  *   create_skill/propose_agent/create_mcp/create_task 不得在自动执行中创建持久实体；
  *   exit_plan 无用户可批准计划）后**全部保留**（read/write/exec 均在），不再有白名单收窄。
- * - **追加**已启用技能的 `skill` 工具（技能加载 headless-安全，用户明确要求「包含 skill」）与
+ * - **追加** `skill` 工具（技能加载 headless-安全，用户明确要求「包含 skill」；清单同样随消息下发）与
  *   **全部已连接 MCP 工具**（用户明确要求「包含 mcp」）。
  * - 每个保留的调用仍经 sealedDecision（读写与命令不设限，仅排除交互/创建类工具）。
  */
-function buildSealedTools(skills: { name: string; description: string }[]): ToolSpec[] {
+function buildSealedTools(): ToolSpec[] {
   const EXCLUDED = new Set([
     'ask_user',
     'run_subagent',
@@ -1702,8 +1700,7 @@ function buildSealedTools(skills: { name: string; description: string }[]): Tool
     'memory_delete'
   ])
   const builtins = toolSpecs.filter((t) => !EXCLUDED.has(t.name))
-  const skillTool = buildSkillTool(skills)
-  return [...builtins, ...(skillTool ? [skillTool] : []), ...getMcpToolSpecs()]
+  return [...builtins, buildSkillTool(), ...getMcpToolSpecs()]
 }
 
 /**
@@ -1847,8 +1844,6 @@ interface AgentLoopArgs {
   allowAskUser: boolean
   /** 是否允许派生子智能体（主轮 true；子轮 false，杜绝子派生子；Phase 4 用）。 */
   allowSubagents: boolean
-  /** 本轮已启用技能快照（供 skill 工具「未找到」提示与正文加载）。 */
-  skillSummaries: { name: string; description: string }[]
   /** 子智能体显示名（depth>0 时随事件下发，供渲染层折叠 Task 卡；主轮 undefined）。 */
   agentName?: string
   /**
@@ -2084,7 +2079,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       interactive,
       allowAskUser,
       allowSubagents,
-      skillSummaries,
       agentName,
       parentToolId
     } = args
@@ -2217,7 +2211,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           interactive: true,
           allowAskUser: false,
           allowSubagents: false,
-          skillSummaries: [],
           agentName: label,
           // 嵌套事件据此归入**本次调用**开出的那张 Task 卡（并行时唯一可靠依据）。
           parentToolId: tc.id,
@@ -2450,6 +2443,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     let emptyNudged = false
     // 本次循环是否已产出过可见内容（正文或工具调用）：空回合追问只针对「从头到尾什么都没有」。
     let producedVisible = false
+    // 技能清单随消息下发（见 skill-listing.ts）：主轮与定时任务（带 skill 工具的 depth 0）才附。
+    // fork 虽共享主对话的工具表，但 depth>0 不得加载技能，且它的历史里已带着主对话附过的清单。
+    const listsSkills = depth === 0 && tools.some((t) => t.name === 'skill')
 
     for (let step = 0; step < maxSteps; step++) {
       // 轮中压缩：第 2 步起每步请求前检查（第 1 步之前调用方已在轮开头查过）。此刻上一步的工具
@@ -2489,6 +2485,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         const stepEffort = sentEffort(model, effort)
         // 同理现算：本步刚因输出预算被拒时，重发即降回保守值。
         const stepBudget = outputBudget(model)
+        // 技能有增减 / 更新（含轮内刚装的）、或压缩 / 删轮抹掉了先前的告知 → 把差异附在本次请求才首发的末条
+        // 消息上。每次（含重发）现算：已告知过即无事，故幂等；压缩自愈后的重发也能补上被摘要掉的清单。
+        if (listsSkills) attachSkillListing(history, enabledSkillSummaries())
 
         for await (const ev of streamChat(
           { adapter: model.adapter, providerId: model.providerId, baseURL: model.baseURL },
@@ -2922,7 +2921,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           const content = found
             ? `已加载技能「${found.name}」，请严格据此指令完成用户任务：\n\n${skillDirNote(found.dir)}${found.instructions}`
             : `未找到名为「${wanted}」的已启用技能。当前可用技能：${
-                skillSummaries.map((s) => s.name).join('、') || '（无）'
+                enabledSkillSummaries().map((s) => s.name).join('、') || '（无）'
               }。`
           const skillSummary = found ? `已加载技能「${found.name}」` : '未找到该技能'
           args.onToolSummary?.(tc.id, skillSummary)
@@ -3266,9 +3265,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         notices.push({ after, kind: 'notice', code: 'empty' })
     }
 
-    // 本轮技能快照（在轮开始时定格）：系统提示词只列 name+description（便宜的渐进式披露），
-    // 有启用技能时才向模型提供 skill 工具（命中后再加载完整正文）。
-    const skillSummaries = enabledSkillSummaries()
     // 本轮 persona 快照（仅主智能体）：
     //  · 绑定了 persona（对话优先外壳）→ 注入**该单条**身份提示词（绑定的 persona 被删则不注入，
     //    绝不回落叠加式，避免绑定对话突然串入其它启用身份）。
@@ -3279,17 +3275,16 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         ? [{ name: persona.name, prompt: persona.prompt }]
         : []
       : enabledPersonas()
-    const skillTool = buildSkillTool(skillSummaries)
     // run_subagent 恒提供：内置子智能体（通用 / Explore / Plan）枚举进工具描述，无需任何用户配置。
     const subagentTool = buildSubagentTool()
-    // 每轮定格：内置工具 + exit_plan（计划先行）+（有启用技能时）skill + run_subagent / send_to_subagent +
-    // 当前已连接 MCP 工具。exit_plan 仅主轮提供（子智能体的 buildSubagentTools 不含它）。
+    // 每轮定格：内置工具 + exit_plan（计划先行）+ skill（描述固定，技能清单随消息下发）+
+    // run_subagent / send_to_subagent + 当前已连接 MCP 工具。exit_plan 仅主轮提供（子智能体的 buildSubagentTools 不含它）。
     // 角色不再收窄工具可见性：所有角色均可按需调用全部工具（每个调用仍照常过同一道权限闸门，零提权）。
     const turnTools: ToolSpec[] = [
       ...toolSpecs,
       buildPlanTool(),
       buildTodoTool(),
-      ...(skillTool ? [skillTool] : []),
+      buildSkillTool(),
       subagentTool,
       buildSendToSubagentTool(),
       ...getMcpToolSpecs()
@@ -3305,7 +3300,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         // （提示缓存前缀稳定），下一轮生效。
         system: systemPrompt(
           effectiveRoot,
-          skillSummaries,
           personas,
           memoryPromptSection({ writable: true, root: effectiveRoot }),
           projectDocPromptSection(loadProjectDoc(effectiveRoot))
@@ -3320,7 +3314,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         interactive: true,
         allowAskUser: true,
         allowSubagents: true,
-        skillSummaries,
         onUsage: (n, read, write) => {
           if (n > 0) lastInput = n
           lastCacheRead = read
@@ -3493,10 +3486,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       pruneCheckpoints(session)
     }
 
-    // 密封工具集：除交互/创建类外全量放开（read/write/exec + 已启用技能 skill + 全部已连接 MCP）；
+    // 密封工具集：除交互/创建类外全量放开（read/write/exec + skill + 全部已连接 MCP）；
     // 每次调用仍经 sealedDecision（仅排除交互/创建类工具）。
-    const skillSummaries = enabledSkillSummaries()
-    const sealedTools = buildSealedTools(skillSummaries)
+    const sealedTools = buildSealedTools()
 
     let lastInput = 0
     let lastCacheRead = 0
@@ -3518,7 +3510,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         interactive: false,
         allowAskUser: false,
         allowSubagents: false,
-        skillSummaries,
         onUsage: (n, read, write) => {
           if (n > 0) lastInput = n
           lastCacheRead = read
