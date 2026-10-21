@@ -11,6 +11,7 @@ import {
   type StopReason,
   type StreamEvent
 } from './types'
+import type { EffortRequest } from '../../shared/effort'
 
 /**
  * Anthropic Messages API 适配器。手写 SSE → 归一化 StreamEvent，不引 SDK。
@@ -85,6 +86,17 @@ function markCacheTail(messages: unknown[]): void {
 }
 
 /**
+ * 思考等级 → thinking 字段（格式见 shared/effort.ts 的 ThinkFormat）。standard（Claude 原生）：adaptive 由模型
+ * 自定想多少，display:'summarized' 让新模型返回可读的思考摘要（它们默认 omitted，思考块文本为空，界面上只见
+ * 一段沉默）。compat（国产 Anthropic 兼容端点）：大多默认开着思考、未必认 adaptive / display，只在须开关时发 type。
+ */
+function thinkingParam(e: EffortRequest | undefined): Record<string, unknown> | undefined {
+  if (!e) return undefined
+  if (e.format === 'compat') return e.thinking ? { type: e.thinking } : undefined
+  return { type: 'adaptive', display: 'summarized' }
+}
+
+/**
  * Anthropic 用量字段。**input_tokens 只计「未命中缓存的余量」**，缓存写入 / 命中分别单列，
  * 三者相加才是本次请求的总提示 token——这点与 OpenAI/DeepSeek 的「prompt_tokens 即总量」相反。
  */
@@ -138,11 +150,11 @@ export async function* streamAnthropic(
     // 输出上限：未指定时给 8192（现代 Claude 模型普遍支持，显著降低长回复被截断的概率）。
     max_tokens: req.maxTokens ?? 8192,
     temperature: req.temperature,
-    // 思考等级：adaptive 由模型自定想多少，effort 定深浅。display:'summarized' 让新模型返回可读的思考摘要
-    //（它们默认 omitted，思考块文本为空，界面上只见一段沉默）。未选等级时两字段为 undefined、序列化即省略。
+    // 思考等级：thinking 开思考（见 thinkingParam），effort 定深浅；只能开不能调的模型不带 effort。
+    // 未选等级时两字段为 undefined、序列化即省略。
     // 思考块不回放（不进历史）：本应用会压缩 / 回滚 / 删轮、每轮注入记忆快照，回放签名块反会撞前缀校验。
-    thinking: req.effort ? { type: 'adaptive', display: 'summarized' } : undefined,
-    output_config: req.effort ? { effort: req.effort.effort } : undefined,
+    thinking: thinkingParam(req.effort),
+    output_config: req.effort?.effort ? { effort: req.effort.effort } : undefined,
     stream: true
   }
 

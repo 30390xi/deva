@@ -120,7 +120,8 @@ export interface GenerateRequest {
    * 思考参数（已按模型能力表收敛、映射好，见 shared/effort.ts 的 effortRequest）。
    * 缺省 = 不发任何思考 / 推理参数，请求体与改造前逐字节一致。适配器按 format 放进各家字段：
    * standard → Anthropic adaptive thinking + output_config.effort / OpenAI Chat reasoning_effort /
-   * Responses reasoning.effort；deepseek / zai / qwen（仅 OpenAI Chat）→ 各家私有开关 + 可选 reasoning_effort。
+   * Responses reasoning.effort；deepseek / zai / qwen（仅 OpenAI Chat）→ 各家私有开关 + 可选 reasoning_effort；
+   * compat（仅 Anthropic，国产兼容端点）→ output_config.effort + 必要时 thinking.type。
    */
   effort?: EffortRequest
 }
