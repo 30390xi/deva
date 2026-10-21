@@ -14,7 +14,8 @@
  *    开关），认不出再按模型家族；
  *  - compat：国产模型走 Anthropic 兼容端点——各家都认 output_config.effort、大多默认开着思考，却未必认 Claude
  *    专属的 adaptive，故只发 effort；只能开不能调的发 thinking.type=enabled，默认不思考的另附 thinking.type=adaptive。
- *  国产家族走 Responses 协议时视为不支持（各家少有该端点，参数也未核实）。
+ *  Responses 协议不分家族，一律按 standard 发 reasoning.effort：国产厂商少有该端点，走它的多是中转站，
+ *  由中转站换算成上游格式（同 pi-ai）；只能开不能调的发 high 表示开启。
  */
 
 /** 'default' = 不发任何思考 / 推理参数，交给模型与服务商的默认行为。 */
@@ -109,10 +110,10 @@ const RULES: Rule[] = [
   // ── Moonshot：kimi-k3 走标准 reasoning_effort（Anthropic 端点不认 thinking 参数）；k2 系用 thinking.type 开思考、不能调档。
   { match: /kimi-k3/, levels: L_H_MAX, reasoningField: true, compat: 'effort' },
   { match: /kimi-k2/, toggle: true, format: 'deepseek' },
-  // ── MiniMax：只核实了 Anthropic 端点（官方推荐接法）；M3 默认不思考，须 adaptive 打开。
-  { match: /minimax-m([3-9]|\d{2,})/, adapters: ['anthropic'], levels: FULL, compat: 'adaptive' },
+  // ── MiniMax：只核实了 Anthropic 端点（官方推荐接法），OpenAI Chat 的开关未核实；M3 默认不思考，须 adaptive 打开。
+  { match: /minimax-m([3-9]|\d{2,})/, adapters: ['anthropic', 'responses'], levels: FULL, compat: 'adaptive' },
   // ── 豆包（火山方舟）：只核实了 Anthropic 端点，output_config.effort 各档都收（不支持的由服务端映射）。
-  { match: /doubao-seed-([2-9]|\d{2,})/, adapters: ['anthropic'], levels: FULL, compat: 'effort' },
+  { match: /doubao-seed-([2-9]|\d{2,})/, adapters: ['anthropic', 'responses'], levels: FULL, compat: 'effort' },
   // ── 其余国产：参数各异、尚未核实，暂不支持
   { match: /kimi|moonshot|minimax|doubao|ernie|hunyuan|baichuan/, levels: null }
 ]
@@ -122,6 +123,8 @@ const FALLBACK: Rule = { match: /^/, levels: LMH }
 
 /** 只能开不能调的模型，内部用一档 high 表示「开启」，不带档位值。 */
 const TOGGLE_MAP: LevelMap = { high: '' }
+/** 同上，走 Responses 协议时：标准协议没有开关字段，发 reasoning.effort=high 表示开启。 */
+const TOGGLE_MAP_RESPONSES: LevelMap = { high: 'high' }
 
 function findRule(adapter: EffortAdapter, modelId: string): Rule {
   const id = modelId.toLowerCase()
@@ -166,11 +169,9 @@ function resolve(adapter: EffortAdapter, modelId: string, baseURL?: string): Res
     const thinking = toggle ? 'enabled' : compat === 'adaptive' ? 'adaptive' : undefined
     return { map, format: 'compat', toggle, reasoningField: false, ...(thinking ? { thinking } : {}) }
   }
-  // 私有格式只在 OpenAI Chat 协议上发得出去；走 Responses 协议时视为不支持。
-  if (adapter === 'responses') {
-    if (family !== 'standard') return null
-    return { map, format: 'standard', toggle: false, reasoningField: false }
-  }
+  // Responses 是标准协议，不分家族一律发 reasoning.effort（见文件头）。
+  if (adapter === 'responses')
+    return { map: toggle ? TOGGLE_MAP_RESPONSES : map, format: 'standard', toggle, reasoningField: false }
   return {
     map,
     format: endpointFormat(baseURL) ?? family,

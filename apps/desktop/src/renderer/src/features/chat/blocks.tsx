@@ -401,8 +401,8 @@ export function BlockView({
     )
   }
 
-  // 思考 / 工具调用 / 子智能体通常由 groupBlocks 归进时间轴；单独交到这里时画成只有一个节点的时间轴。
-  if (block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'subagent') {
+  // 思考 / 工具调用 / 子智能体 / 已完成清单通常由 groupBlocks 归进时间轴；单独交到这里时画成只有一个节点的时间轴。
+  if (block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'subagent' || block.kind === 'todolist') {
     return <Timeline steps={[{ block, index: 0 }]} liveBlock={thinkingDone ? undefined : block} />
   }
 
@@ -424,10 +424,6 @@ export function BlockView({
 
   if (block.kind === 'mount') {
     return <MountRequestCard block={block} onMountReq={onMountReq} />
-  }
-
-  if (block.kind === 'todolist') {
-    return <TodoDoneCard block={block} />
   }
 
   // 步骤边界标记：只服务于重连时丢残缺尾部的判定，不渲染。
@@ -1220,6 +1216,44 @@ function TimelinePlan({ block }: { block: Extract<ChatBlock, { kind: 'plan' }> }
   )
 }
 
+/**
+ * 时间轴上已完成的待办清单：「已完成清单 + 标题 + 条目数」，点开看全部条目。清单全部完成时落在对话流里
+ * （输入框上方的进度胶囊随之收起）。纯展示，不进模型上下文。
+ */
+function TimelineTodo({ block }: { block: Extract<ChatBlock, { kind: 'todolist' }> }): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  return (
+    <li className={`tl__item${open ? ' is-open' : ''}`}>
+      <span className="tl__node">
+        <ClipboardCheck size={14} />
+      </span>
+      <div className="tl__main">
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="tl__text">
+            <span className="tl__verb">{t('chat.todo.doneTitle')}</span>
+            <span>{block.title || t('chat.todo.untitled')}</span>
+            <span className="tl__extra">
+              {block.items.length} {t('chat.todo.itemUnit')}
+            </span>
+          </span>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
+        {open && (
+          <div className="tl__body tl__todo">
+            <TodoItemList items={block.items} />
+          </div>
+        )}
+      </div>
+    </li>
+  )
+}
+
 /** 时间轴上已处置的挂载请求：「已挂载工作区 + 目录」或「未挂载工作区」。 */
 function TimelineMount({ block }: { block: Extract<ChatBlock, { kind: 'mount' }> }): React.JSX.Element {
   const { t } = useI18n()
@@ -1278,6 +1312,7 @@ export function Timeline({
         if (b.kind === 'ask') return <TimelineAsk key={b.key} block={b} />
         if (b.kind === 'plan') return <TimelinePlan key={b.key} block={b} />
         if (b.kind === 'mount') return <TimelineMount key={b.key} block={b} />
+        if (b.kind === 'todolist') return <TimelineTodo key={b.id} block={b} />
         return null
       })}
       {capped && (
@@ -1305,14 +1340,15 @@ export type BlockItem =
   | { type: 'timeline'; steps: TimelineStep[]; key: string }
 
 /**
- * 进时间轴的块：思考、工具调用（含交付，交付卡另见 DeliveryCards）、子智能体，以及已经处置过的提问 / 计划 /
- * 挂载请求（还在等你处置时是对话里的卡片）。
+ * 进时间轴的块：思考、工具调用（含交付，交付卡另见 DeliveryCards）、子智能体、已完成的待办清单，以及已经
+ * 处置过的提问 / 计划 / 挂载请求（还在等你处置时是对话里的卡片）。
  */
 function isTimelineStep(b: ChatBlock): boolean {
   switch (b.kind) {
     case 'tool':
     case 'thinking':
     case 'subagent':
+    case 'todolist':
       return true
     case 'ask':
       return b.answers !== undefined
@@ -1402,10 +1438,10 @@ export function DeliveryCards({ blocks }: { blocks: ChatBlock[] }): React.JSX.El
   )
 }
 
-/** 算「过程」的块：时间轴上的各步、已完成的待办清单（固定展示的除外）。 */
+/** 算「过程」的块：时间轴上的各步（固定展示的除外）。 */
 function isProcess(b: ChatBlock): boolean {
   if (isPinned(b)) return false
-  return isTimelineStep(b) || b.kind === 'todolist'
+  return isTimelineStep(b)
 }
 
 /** 块序列里是否已有过程（思考 / 工具调用 / 子智能体 / 已完成清单）：有则消息里会出现「工作过程」折叠条。 */
@@ -1620,46 +1656,6 @@ function TimelineSubagent({ block }: { block: Extract<ChatBlock, { kind: 'subage
 }
 
 /**
- * 已完成的待办清单卡：清单全部完成时落在对话流里（输入框上方的进度胶囊随之收起）。默认收起，
- * 展开看全部条目。纯展示，不进模型上下文。
- */
-function TodoDoneCard({
-  block
-}: {
-  block: Extract<ChatBlock, { kind: 'todolist' }>
-}): React.JSX.Element {
-  const { t } = useI18n()
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={`subagent todocard${open ? ' is-open' : ''}`}>
-      <button
-        type="button"
-        className="subagent__head"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <ChevronRight size={13} className="subagent__caret" />
-        <span className="subagent__head-icon">
-          <ClipboardCheck size={14} />
-        </span>
-        <span className="subagent__title">
-          {t('chat.todo.doneTitle')} · <strong>{block.title || t('chat.todo.untitled')}</strong>
-          <span className="subagent__count">
-            {block.items.length} {t('chat.todo.itemUnit')}
-          </span>
-        </span>
-        <ToolBadge status="ok" summary={t('chat.todo.finished')} />
-      </button>
-      {open && (
-        <div className="subagent__body">
-          <TodoItemList items={block.items} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
  * 角色名片（propose_agent 提议）：微信名片式紧凑卡。
  * pending → 可点，点开预填的 PersonaEditor 供查看/微调/接受/拒绝；accepted/rejected 为终态、不可点。
  * 不传 onOpen → 名片始终只读展示。
@@ -1717,32 +1713,5 @@ function AgentCard({
         {hint}
       </span>
     </div>
-  )
-}
-
-function ToolBadge({ status, summary }: { status: ToolStatus; summary?: string }): React.JSX.Element {
-  const { t } = useI18n()
-  if (status === 'running')
-    return (
-      <span className="card__badge badge--pending">
-        <Loader2 size={12} className="spin" /> {t('chat.status.running')}
-      </span>
-    )
-  if (status === 'ok')
-    return (
-      <span className="card__badge badge--ok">
-        <CheckCircle2 size={12} /> {summary || t('chat.status.done')}
-      </span>
-    )
-  if (status === 'denied')
-    return (
-      <span className="card__badge badge--err">
-        <XCircle size={12} /> {t('chat.status.denied')}
-      </span>
-    )
-  return (
-    <span className="card__badge badge--err">
-      <XCircle size={12} /> {summary || t('chat.status.failed')}
-    </span>
   )
 }

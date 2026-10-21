@@ -140,10 +140,8 @@ export function ModelSettings(): React.JSX.Element {
         <span className="provider-row__main">
           <span className="provider-row__name">
             <span className="provider-row__name-text">{p.name}</span>
-            {/* 标签标示用途：对话模型 / 决策模型（取代原官方/自定义标签） */}
-            <span className={`tag${isDecision ? ' tag--decision' : ''}`}>
-              {isDecision ? t('models.tagDecision') : t('models.tagLLM')}
-            </span>
+            {/* 对话模型是常态不加标签；决策模型标出用途 */}
+            {isDecision && <span className="tag tag--decision">{t('models.tagDecision')}</span>}
           </span>
           <span className="provider-row__sub">
             {isDecision
@@ -433,14 +431,10 @@ export function ModelSettings(): React.JSX.Element {
             ) : (
               <h2 className="provider-detail__name">{selectedProvider.name}</h2>
             )}
-            {/* 用途标签：对话模型 / 决策模型（取代官方/自定义标签，与列表行一致） */}
-            <span
-              className={`tag${selectedProvider.purpose === 'decision' ? ' tag--decision' : ''}`}
-            >
-              {selectedProvider.purpose === 'decision'
-                ? t('models.tagDecision')
-                : t('models.tagLLM')}
-            </span>
+            {/* 用途标签：只标决策模型（与列表行一致） */}
+            {selectedProvider.purpose === 'decision' && (
+              <span className="tag tag--decision">{t('models.tagDecision')}</span>
+            )}
           </header>
 
           {/* 已启用但未配置密钥 → 提醒（本地 Ollama 之类可无钥，此处仅作提示不阻断） */}

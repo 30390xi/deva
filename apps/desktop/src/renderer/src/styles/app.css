@@ -1448,7 +1448,7 @@ button.tl__line:hover {
   }
 }
 
-/* 待办清单条目（「已完成清单」卡与输入框上方的清单面板共用）：已完成打勾划线、进行中高亮、待办空心圈。 */
+/* 待办清单条目（时间轴上的「已完成清单」与输入框上方的清单面板共用）：已完成打勾划线、进行中高亮、待办空心圈。 */
 .todo-items {
   list-style: none;
   margin: 0;
@@ -1497,9 +1497,9 @@ button.tl__line:hover {
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--fg-muted) 60%, transparent);
 }
-/* 已完成清单卡：复用子智能体折叠卡的骨架，标题图标改用完成色。 */
-.todocard .subagent__head-icon {
-  color: var(--success);
+/* 时间轴上已完成清单展开后的条目：与已作答提问的回述留一样的下边距 */
+.tl__todo {
+  padding-bottom: var(--space-1);
 }
 
 /* 交付卡（present_files）：成品文件逐行列出——缩略图 + 文件名 / 大小·目录 + 打开 / 在文件夹中显示 / 复制路径。
