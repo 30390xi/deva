@@ -376,8 +376,7 @@ export function BlockView({
   onPlan,
   onMountReq,
   onOpenProposal,
-  onOpenAutotask,
-  onStopSubagent
+  onOpenAutotask
 }: {
   block: ChatBlock
   thinkingDone: boolean
@@ -390,8 +389,6 @@ export function BlockView({
   onOpenProposal?: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   /** created 态定时任务名片「打开任务会话」（缺省 → 不显跳转）。 */
   onOpenAutotask?: (taskId: string) => void
-  /** 停止后台运行的子智能体（缺省 → Task 卡不显停止键）。 */
-  onStopSubagent?: (toolId: string) => void
 }): React.JSX.Element | null {
   const { t } = useI18n()
 
@@ -409,13 +406,7 @@ export function BlockView({
 
   // 思考 / 工具调用 / 子智能体通常由 groupBlocks 归进时间轴；单独交到这里时画成只有一个节点的时间轴。
   if (block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'subagent') {
-    return (
-      <Timeline
-        steps={[{ block, index: 0 }]}
-        liveBlock={thinkingDone ? undefined : block}
-        onStopSubagent={onStopSubagent}
-      />
-    )
+    return <Timeline steps={[{ block, index: 0 }]} liveBlock={thinkingDone ? undefined : block} />
   }
 
   if (block.kind === 'agentcard') {
@@ -576,13 +567,7 @@ function PlanReviewCard({
   const submitKeep = (): void => {
     if (reply) onPlan?.(block.key, 'keep', reply)
   }
-  // 收起态摘要：计划正文首个非空行，剥掉 Markdown 标题 / 列表 / 强调标记。
-  const summary = decided
-    ? (block.plan.split('\n').find((l) => l.trim()) ?? '')
-        .replace(/^\s*(#+|[-*+]|\d+[.)])\s*/, '')
-        .replace(/[*_`]/g, '')
-        .trim()
-    : ''
+  const summary = decided ? planSummary(block.plan) : ''
   return (
     <div
       className={`msg__plan${decided ? ' is-decided' : ''}${decided === 'approve' ? ' is-ok' : ''}`}
@@ -694,6 +679,14 @@ function PlanReviewCard({
       )}
     </div>
   )
+}
+
+/** 计划的一行摘要：正文首个非空行，剥掉 Markdown 标题 / 列表 / 强调标记（已决计划卡收起态与时间轴节点共用）。 */
+function planSummary(plan: string): string {
+  return (plan.split('\n').find((l) => l.trim()) ?? '')
+    .replace(/^\s*(#+|[-*+]|\d+[.)])\s*/, '')
+    .replace(/[*_`]/g, '')
+    .trim()
 }
 
 /** 单个问题的作答草稿：已选标签集合 + 是否展开自由输入 + 自由输入文本。 */
@@ -1061,6 +1054,9 @@ function AskCard({
  */
 const QUIET_SUMMARIES = new Set(['已编辑', '已写入', '退出码 0'])
 
+/** 子智能体被用户亲手停下的结局摘要（后台「已停止」/ 前台「已中止」）：不当作出错展示。 */
+const STOPPED_SUMMARIES = new Set(['已停止', '已中止'])
+
 /** 工具的动词键（chat.flow.{done|doing|base}.<键>），与 TOOL_META 同名；未知工具（如 MCP 工具）为 unknown。 */
 function verbKey(name: string): string {
   return TOOL_META[name]?.key ?? 'unknown'
@@ -1081,8 +1077,9 @@ function stepIcon(step: ToolStep, size: number): React.JSX.Element {
 /**
  * 一次工具调用的文字：动词 + 对象 + 结果说明（单行省略，完整对象挂在外层的悬停上）。
  * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝用红字写明原因。
+ * 时间轴与后台任务面板（每个后台子智能体的当前步骤）共用。
  */
-function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
+export function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
   const { t } = useI18n()
   const key = verbKey(step.name)
   const obj = flowObject(step.name, step.args)
@@ -1142,6 +1139,111 @@ function TimelineNote({ text }: { text: string }): React.JSX.Element {
   )
 }
 
+/**
+ * 时间轴上已作答的提问：「已回答 + 答案摘要」，点开逐题回述。作答前它是对话里的问答卡（等你回复），
+ * 答完就收进工作过程，免得一张大卡留在中间，后续步骤与回复一上一下把页面拉来拉去。
+ */
+function TimelineAsk({ block }: { block: Extract<ChatBlock, { kind: 'ask' }> }): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const given = (block.answers ?? []).filter((a) => a.trim())
+  const multiQ = block.questions.length > 1
+  return (
+    <li className={`tl__item${open ? ' is-open' : ''}`}>
+      <span className="tl__node">
+        <MessageCircleQuestion size={14} />
+      </span>
+      <div className="tl__main">
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="tl__text">
+            <span className="tl__verb">{t(given.length > 0 ? 'chat.ask.answered' : 'chat.ask.unanswered')}</span>
+            {given.length > 0 && <span>{given.join('；')}</span>}
+          </span>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
+        {open && (
+          <div className="tl__body tl__qa">
+            {block.questions.map((q, qi) => (
+              <div key={qi}>
+                <div className="tl__qa-q">
+                  {multiQ && `${qi + 1}. `}
+                  {q.question}
+                </div>
+                <div className="tl__qa-a">{block.answers?.[qi] || t('chat.ask.noAnswer')}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </li>
+  )
+}
+
+/** 时间轴上已决定的计划：「已批准计划 + 摘要」等，点开看计划全文与你写的回复。 */
+function TimelinePlan({ block }: { block: Extract<ChatBlock, { kind: 'plan' }> }): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const decision = block.decided ?? 'cancelled'
+  return (
+    <li className={`tl__item${open ? ' is-open' : ''}`}>
+      <span className="tl__node">
+        {decision === 'approve' ? <ClipboardCheck size={14} /> : <ClipboardList size={14} />}
+      </span>
+      <div className="tl__main">
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="tl__text">
+            <span className="tl__verb">{t(`chat.flow.plan.${decision}`)}</span>
+            <span>{planSummary(block.plan)}</span>
+          </span>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
+        {open && (
+          <div className="tl__body tl__plan">
+            <Markdown text={block.plan} muted />
+            {block.feedback && (
+              <div className="tl__feedback">
+                <span className="tl__feedback-label">{t('chat.plan.feedbackLabel')}</span>
+                {block.feedback}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </li>
+  )
+}
+
+/** 时间轴上已处置的挂载请求：「已挂载工作区 + 目录」或「未挂载工作区」。 */
+function TimelineMount({ block }: { block: Extract<ChatBlock, { kind: 'mount' }> }): React.JSX.Element {
+  const { t } = useI18n()
+  const mounted = block.decided === 'mounted'
+  return (
+    <li className="tl__item">
+      <span className="tl__node">
+        <FolderOpen size={14} />
+      </span>
+      <div className="tl__main">
+        <div className="tl__line" title={mounted ? block.root : undefined}>
+          <span className="tl__text">
+            <span className="tl__verb">{t(mounted ? 'chat.flow.mount.mounted' : 'chat.flow.mount.skipped')}</span>
+            {mounted && block.root && <code className="tl__obj">{block.root}</code>}
+          </span>
+        </div>
+      </div>
+    </li>
+  )
+}
+
 /** 时间轴的一步（index 为其在原块序列中的下标）。 */
 type TimelineStep = { block: ChatBlock; index: number }
 
@@ -1156,14 +1258,12 @@ export function Timeline({
   steps,
   liveBlock,
   compact = false,
-  limit,
-  onStopSubagent
+  limit
 }: {
   steps: TimelineStep[]
   liveBlock?: ChatBlock
   compact?: boolean
   limit?: number
-  onStopSubagent?: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const capped = limit !== undefined && steps.length > limit
@@ -1172,12 +1272,15 @@ export function Timeline({
     <ol className="tl">
       {shown.map(({ block: b, index }) => {
         if (b.kind === 'tool') return <TimelineTool key={b.id} step={b} />
-        if (b.kind === 'subagent') return <TimelineSubagent key={b.id} block={b} onStop={onStopSubagent} />
+        if (b.kind === 'subagent') return <TimelineSubagent key={b.id} block={b} />
         if (b.kind === 'thinking')
           return (
             <TimelineThinking key={`i${index}`} text={b.text} done={b !== liveBlock} autoOpen={!compact} />
           )
         if (b.kind === 'text') return <TimelineNote key={`i${index}`} text={b.text} />
+        if (b.kind === 'ask') return <TimelineAsk key={b.key} block={b} />
+        if (b.kind === 'plan') return <TimelinePlan key={b.key} block={b} />
+        if (b.kind === 'mount') return <TimelineMount key={b.key} block={b} />
         return null
       })}
       {capped && (
@@ -1204,10 +1307,25 @@ export type BlockItem =
   | { type: 'single'; block: ChatBlock; index: number }
   | { type: 'timeline'; steps: TimelineStep[]; key: string }
 
-/** 进时间轴的块：思考、工具调用（成功的交付除外，它是交付卡）、子智能体。 */
+/**
+ * 进时间轴的块：思考、工具调用（成功的交付除外，它是交付卡）、子智能体，以及已经处置过的提问 / 计划 /
+ * 挂载请求（还在等你处置时是对话里的卡片）。
+ */
 function isTimelineStep(b: ChatBlock): boolean {
-  if (b.kind === 'tool') return !(b.name === 'present_files' && b.status === 'ok')
-  return b.kind === 'thinking' || b.kind === 'subagent'
+  switch (b.kind) {
+    case 'tool':
+      return !(b.name === 'present_files' && b.status === 'ok')
+    case 'thinking':
+    case 'subagent':
+      return true
+    case 'ask':
+      return b.answers !== undefined
+    case 'plan':
+    case 'mount':
+      return Boolean(b.decided)
+    default:
+      return false
+  }
 }
 
 /**
@@ -1246,33 +1364,34 @@ export function groupBlocks(blocks: ChatBlock[], notesInline = false): BlockItem
 }
 
 /**
- * 回合结束后也不折进「工作过程」的块：角色 / 任务名片、交付卡、问答 / 计划 / 挂载卡、错误与回合提示，
- * 以及仍在后台运行的子智能体（要留着停止键）——这些是要用户看到或处理的结果，不是过程。
+ * 不折进「工作过程」的块：角色 / 任务名片、交付卡、错误与回合提示、还在等你处置的问答 / 计划 / 挂载卡——
+ * 这些是要用户看到或处理的结果，不是过程。问答 / 计划 / 挂载卡处置完就成了过程的一步，收进折叠条。
+ * 后台运行的子智能体也是过程的一步（停止键在输入框上方的后台任务胶囊里，不在对话流中）。
  */
 function isPinned(b: ChatBlock): boolean {
   switch (b.kind) {
     case 'agentcard':
     case 'autotaskcard':
-    case 'ask':
-    case 'plan':
-    case 'mount':
     case 'error':
     case 'notice':
     case 'compaction':
       return true
+    case 'ask':
+      return b.answers === undefined
+    case 'plan':
+    case 'mount':
+      return !b.decided
     case 'tool':
       return b.name === 'present_files' && b.status === 'ok'
-    case 'subagent':
-      return Boolean(b.background) && b.status === 'running'
     default:
       return false
   }
 }
 
-/** 算「过程」的块：思考、工具调用、子智能体、已完成的待办清单（固定展示的除外）。 */
+/** 算「过程」的块：时间轴上的各步、已完成的待办清单（固定展示的除外）。 */
 function isProcess(b: ChatBlock): boolean {
   if (isPinned(b)) return false
-  return b.kind === 'thinking' || b.kind === 'tool' || b.kind === 'subagent' || b.kind === 'todolist'
+  return isTimelineStep(b) || b.kind === 'todolist'
 }
 
 /** 块序列里是否已有过程（思考 / 工具调用 / 子智能体 / 已完成清单）：有则消息里会出现「工作过程」折叠条。 */
@@ -1310,10 +1429,13 @@ export function splitProcess(
 /**
  * 进行中折叠条下露出的「当前步骤」：所有还在执行的工具调用 / 子智能体（并行的一并列出）；都执行完、
  * 模型在想下一步时，保留最近的一步（含思考中），免得这块在一行和零行之间来回闪。
+ * 后台运行的子智能体不算：它不是本轮在等的事，常常比回合活得长，由输入框上方的后台任务胶囊展示。
  */
 export function currentSteps(process: ChatBlock[]): ChatBlock[] {
   const steps = process.filter(isTimelineStep)
-  const running = steps.filter((b) => (b.kind === 'tool' || b.kind === 'subagent') && b.status === 'running')
+  const running = steps.filter(
+    (b) => (b.kind === 'tool' && b.status === 'running') || (b.kind === 'subagent' && b.status === 'running' && !b.background)
+  )
   if (running.length > 0) return running
   return steps.length > 0 ? [steps[steps.length - 1]] : []
 }
@@ -1358,7 +1480,10 @@ export function ProcessFold({
   children: React.ReactNode
 }): React.JSX.Element {
   const { t } = useI18n()
-  const calls = blocks.filter((b) => b.kind === 'tool' || b.kind === 'subagent').length
+  // 步数：工具调用、子智能体、提问、计划各算一步（它们在模型那边都是一次工具调用）。
+  const calls = blocks.filter(
+    (b) => b.kind === 'tool' || b.kind === 'subagent' || b.kind === 'ask' || b.kind === 'plan'
+  ).length
   const parts: string[] = []
   if (live) parts.push(t('chat.process.live'))
   else if (durationMs !== undefined)
@@ -1397,78 +1522,64 @@ function subagentName(agent: string | undefined, t: (key: string) => string): st
 }
 
 /**
+ * 子智能体的标题（时间轴节点与后台任务胶囊共用）：优先用模型给的任务描述（3-5 字），比固定的子智能体名
+ * 有信息量，也与 Claude Code 一致；没给描述时退回子智能体名（未指定预设则为「通用子智能体」）。
+ */
+export function subagentTitle(
+  block: Extract<ChatBlock, { kind: 'subagent' }>,
+  t: (key: string) => string
+): string {
+  return block.desc || subagentName(block.agent, t) || t('chat.subagent.fallback')
+}
+
+/**
  * 时间轴上的子智能体节点（可展开）：「子智能体任务 + 标题」+ 后台标记 + 内部步数；执行中转圈、扫光，
  * 失败节点变红并写明原因。展开后看任务描述与内部工具调用（每步一行，带小图标）。
+ * 后台运行的停止键不在这里，在输入框上方的后台任务胶囊里（BackgroundCapsule）。
  * 子智能体的权限请求不在此节点内——照常作为顶层权限卡浮出确认（见 reduceBlocks）。
  */
-function TimelineSubagent({
-  block,
-  onStop
-}: {
-  block: Extract<ChatBlock, { kind: 'subagent' }>
-  onStop?: (toolId: string) => void
-}): React.JSX.Element {
+function TimelineSubagent({ block }: { block: Extract<ChatBlock, { kind: 'subagent' }> }): React.JSX.Element {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
-  // 已点停止、等主进程收尾事件定格的那一小段：按钮置灰，免得连点。
-  const [stopping, setStopping] = useState(false)
-  // 标题优先用模型给的任务描述（3-5 字）：比固定的子智能体名有信息量，也与 Claude Code 一致；
-  // 没给描述时退回子智能体名（未指定预设则为「通用子智能体」）。
-  const name = block.desc || subagentName(block.agent, t) || t('chat.subagent.fallback')
+  const name = subagentTitle(block, t)
   const label = t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')
   const count = block.children.length
   const running = block.status === 'running'
-  const failed = isFailed(block.status)
-  // 后台运行中的子智能体不随主轮的停止键停下，只能在这里单独停。
-  const stoppable = block.background && running && onStop
+  // 结局摘要（主进程定稿的中文）：早期版本带「子智能体「名称」」前缀，节点上紧挨着名称，剥掉免得重复。
+  const outcome = block.summary?.replace(/^子智能体「[^」]*」/, '')
+  // 用户亲手停的（后台「已停止」/ 前台「已中止」）不是出错：灰字写明结局，节点不标红。
+  const stopped = isFailed(block.status) && STOPPED_SUMMARIES.has(outcome ?? '')
+  const failed = isFailed(block.status) && !stopped
   return (
     <li className={`tl__item${running ? ' is-run' : failed ? ' is-err' : ''}${open ? ' is-open' : ''}`}>
       <span className="tl__node">
         {running ? <Loader2 size={14} className="spin" /> : failed ? <XCircle size={14} /> : <Bot size={14} />}
       </span>
       <div className="tl__main">
-        <div className="tl__head">
-          <button
-            type="button"
-            className="tl__line"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            <span className="tl__text">
-              <span className={running ? 'tl__shimmer' : 'tl__verb'}>{label}</span>
-              <span>{name}</span>
-              {block.background && <span className="tl__tag">{t('chat.subagent.background')}</span>}
-              {count > 0 && (
-                <span className="tl__extra">
-                  {count} {t('chat.subagent.stepUnit')}
-                </span>
-              )}
-              {failed && (
-                <span className="tl__err">
-                  {block.status === 'denied'
-                    ? t('chat.status.denied')
-                    : block.summary || t('chat.status.failed')}
-                </span>
-              )}
-            </span>
-            <ChevronRight size={12} className="tl__caret" />
-          </button>
-          {stoppable && (
-            <button
-              type="button"
-              className="tl__stop"
-              title={t('chat.subagent.stopHint')}
-              disabled={stopping}
-              onClick={() => {
-                setStopping(true)
-                onStop(block.id)
-              }}
-            >
-              <Square size={9} />
-              {t('chat.subagent.stop')}
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="tl__text">
+            <span className={running ? 'tl__shimmer' : 'tl__verb'}>{label}</span>
+            <span>{name}</span>
+            {block.background && <span className="tl__tag">{t('chat.subagent.background')}</span>}
+            {count > 0 && (
+              <span className="tl__extra">
+                {count} {t('chat.subagent.stepUnit')}
+              </span>
+            )}
+            {stopped && <span className="tl__extra">{outcome}</span>}
+            {failed && (
+              <span className="tl__err">
+                {block.status === 'denied' ? t('chat.status.denied') : outcome || t('chat.status.failed')}
+              </span>
+            )}
+          </span>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
         {open && (
           <div className="tl__body">
             {block.task && <div className="tl__task">{block.task}</div>}

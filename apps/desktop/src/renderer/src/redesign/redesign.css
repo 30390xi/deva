@@ -1618,11 +1618,25 @@ body.cf-resizing-y * {
   font-size: 11px;
   color: var(--fg-subtle);
 }
-/* 待办清单进度胶囊：输入盒正上方、左对齐、随内容宽，最多一个（进行中的清单）；点开向上展开其条目（与输入盒同宽）。 */
-.cf-todo {
+/*
+ * 输入盒正上方的胶囊排：待办清单进度 + 后台任务，左对齐、随内容宽，始终一行——换行会让输入框上方忽高忽低。
+ * 放不下时两枚按各自内容宽度等比收缩，文字各自省略（计数、停止键等不收缩）；都没有时整排不占位。
+ */
+.cf-dock {
+  display: flex;
+  gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
-.cf-todo__pill {
+.cf-dock:empty {
+  display: none;
+}
+.cf-dock > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* 待办清单进度胶囊：最多一个（进行中的清单）；点开向上展开其条目（与输入盒同宽）。 */
+.cf-todo__pill,
+.cf-bg__pill {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -1638,9 +1652,109 @@ body.cf-resizing-y * {
   cursor: pointer;
 }
 .cf-todo__pill:hover,
-.cf-todo.is-open .cf-todo__pill {
+.cf-todo.is-open .cf-todo__pill,
+.cf-bg__pill.is-toggle:hover,
+.cf-bg.is-open .cf-bg__pill {
   border-color: var(--border-strong);
   color: var(--fg);
+}
+/*
+ * 后台任务胶囊（与待办清单胶囊同一排、同一外观）：一个任务时「⟳ 后台 标题 [停止]」，胶囊本身不可点；
+ * 多个时「⟳ N 个后台任务 ˄」，点开向上展开逐个停止（面板复用待办清单面板的样式）。
+ */
+.cf-bg__pill {
+  cursor: default;
+}
+.cf-bg__pill.is-toggle {
+  cursor: pointer;
+}
+.cf-bg__spin {
+  flex: none;
+  color: var(--accent);
+}
+.cf-bg__label {
+  flex: none;
+  color: var(--accent);
+}
+.cf-bg__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+.cf-bg__caret {
+  flex: none;
+  color: var(--fg-subtle);
+  transition: transform 0.15s ease;
+}
+.cf-bg.is-open .cf-bg__caret {
+  transform: rotate(180deg);
+}
+.cf-bg__stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: -4px;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+.cf-bg__stop:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.cf-bg__stop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cf-bg__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* 面板里的一个任务：标题行（转圈 + 标题 + 停止）下面一行它当前的步骤，与标题左对齐 */
+.cf-bg__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cf-bg__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 13px;
+}
+.cf-bg__row .cf-bg__name {
+  flex: 1;
+}
+/* 当前步骤恒为一行：工具文字过长时省略，「等 N 项」后缀不收缩——每个任务最多两行，面板不会被撑开 */
+.cf-bg__step {
+  display: flex;
+  min-width: 0;
+  padding-left: 21px; /* 转圈图标 13px + 间距 8px */
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.cf-bg__more {
+  flex: none;
+  margin-left: 6px;
+  color: var(--fg-subtle);
+}
+.cf-bg__step .tl__obj,
+.cf-bg__step .tl__extra,
+.cf-bg__step .tl__err {
+  font-size: 11.5px;
 }
 .cf-todo__now {
   min-width: 0;

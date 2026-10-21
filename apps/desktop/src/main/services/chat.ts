@@ -2288,7 +2288,6 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     }): Promise<{ conclusion: string; isErr: boolean }> {
       const prep =
         tc.name === 'send_to_subagent' ? prepareContinueSubagent(tc) : prepareNewSubagent(tc)
-      const label = prep.label
       if (prep.rec && (tc.args as { run_in_background?: unknown } | null)?.run_in_background === true)
         return launchBackgroundSubagent(tc, prep.rec, prep.note)
       let conclusion: string
@@ -2308,11 +2307,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         conclusion = prep.note + (prep.error ?? '')
       }
 
-      const subSummary = aborted
-        ? `子智能体「${label}」已中止`
-        : isErr
-          ? `子智能体「${label}」未完成`
-          : `子智能体「${label}」已完成`
+      // 摘要只写结局：界面上它紧挨着子智能体的名称显示，再带上名称就重复了。
+      const subSummary = aborted ? '已中止' : isErr ? '未完成' : '已完成'
       args.onToolSummary?.(tc.id, subSummary)
       // 父轮（depth 0）事件不盖戳：run_subagent 这张卡本身即 Task 卡的「壳」，
       // 其内部嵌套事件已在递归调用里各自盖了 depth+parent 戳并折叠进来。
@@ -2350,7 +2346,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       }
       setSubagentBusy(sessionId, rec.id, true)
       backgroundSubagents.set(tc.id, entry)
-      setBackgroundState(sessionId, tc.id, 'running', `子智能体「${label}」后台运行中`)
+      setBackgroundState(sessionId, tc.id, 'running', '后台运行中')
       void runSubagentLoop(rec, tc, bg)
         .then((r) => {
           backgroundSubagents.delete(tc.id)
@@ -2365,11 +2361,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             return
           }
           const stopped = entry.stoppedByUser
-          const summary = stopped
-            ? `子智能体「${label}」已停止`
-            : r.isErr
-              ? `子智能体「${label}」未完成`
-              : `子智能体「${label}」已完成`
+          // 摘要只写结局（界面上紧挨着子智能体名称显示）；通知标题另写全称。
+          const summary = stopped ? '已停止' : r.isErr ? '未完成' : '已完成'
           setBackgroundState(sessionId, tc.id, r.isErr ? 'error' : 'ok', summary)
           emit('', sessionId, { type: 'tool_result', id: tc.id, name: tc.name, summary, isError: r.isErr, bg: true })
           const status = stopped ? '已被用户停止' : r.isErr ? '未完成' : '已完成'

@@ -75,6 +75,7 @@ import { ScheduleEditor } from '../features/chat/ScheduleEditor'
 import { TaskModelSelect, TaskPersonaSelect } from '../features/chat/TaskPickers'
 import { taskErrorKey } from '../features/chat/TaskConfirmCard'
 import { TodoCapsule } from '../features/chat/Todos'
+import { BackgroundCapsule } from '../features/chat/BackgroundTasks'
 import { ModelSetupCard } from '../features/chat/ModelSetupCard'
 import { Markdown } from '../features/chat/Markdown'
 import {
@@ -315,8 +316,7 @@ export function ChatFirstShell(): React.JSX.Element {
     mountFocus,
     respondAsk,
     respondPlan,
-    respondMount,
-    stopSubagent
+    respondMount
   } = useChat()
   const { personas, remove, reorderPersonas } = useExtensions()
   const { tasks } = useTasks()
@@ -616,7 +616,6 @@ export function ChatFirstShell(): React.JSX.Element {
                 onMountReq={respondMount}
                 onOpenProposal={openProposal}
                 onOpenAutotask={openAutotask}
-                onStopSubagent={stopSubagent}
                 onDeleteTurns={deleteTurnsWithConfirm}
                 attention={sessionStates[currentSessionId]?.attention ?? false}
                 prefill={composerPrefill}
@@ -2950,7 +2949,6 @@ function Conversation({
   onMountReq,
   onOpenProposal,
   onOpenAutotask,
-  onStopSubagent,
   onDeleteTurns,
   attention,
   prefill,
@@ -2974,8 +2972,6 @@ function Conversation({
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   /** created 态定时任务名片「打开任务会话」。 */
   onOpenAutotask: (taskId: string) => void
-  /** 停止一个后台运行的子智能体（Task 卡上的停止键）。 */
-  onStopSubagent: (toolId: string) => void
   /** 按「轮」删除选中轮次（含破坏性确认）；返回是否已删（true=退出选择态并清空选择）。 */
   onDeleteTurns: (turnIndices: number[]) => Promise<boolean>
   /** 当前会话有待用户处理的卡片（问答 / 计划 / 挂载请求）：此时不开回滚面板。 */
@@ -3229,6 +3225,15 @@ function Conversation({
     return onSend(text, attachments)
   }
 
+  // 底部工作状态行。本轮已有「工作过程」折叠条时，常规的「正在做什么 + 计时」已在折叠条里，只剩等待作答 /
+  // 重连 / 压缩这些特殊状态；它们放进这条消息的末尾，紧跟步骤与卡片——放在消息列表下面的话，进行中消息底部
+  // 撑住的空白（见 ConvMessage）会把它和上面的步骤隔开。还没有折叠条时照常放在列表下方。
+  const lastMsg = messages[messages.length - 1]
+  const folded = streaming && lastMsg?.role === 'assistant' && hasProcess(lastMsg.blocks)
+  const statusLine = streaming ? (
+    <StatusIndicator activity={deriveActivity(messages)} status={streamStatus} folded={folded} onStop={onStop} />
+  ) : null
+
   // 单条消息渲染（选择态与常态复用；选择态下 active 恒 false，因选择只在非流式时可用）。
   // turn：常态渲染传入，标注到根 data-turn 供右键定位；选择态用卡片自身处理点击，无需传。
   const renderMsg = (m: ChatMessage, i: number, turn?: number): React.JSX.Element => (
@@ -3239,13 +3244,13 @@ function Conversation({
       active={!selecting && streaming && i === messages.length - 1}
       latest={i === messages.length - 1}
       elapsedSec={i === messages.length - 1 ? streamStatus.elapsedSec : 0}
+      footer={folded && !selecting && i === messages.length - 1 ? statusLine : undefined}
       dataTurn={turn}
       onAsk={onAsk}
       onPlan={onPlan}
       onMountReq={onMountReq}
       onOpenProposal={onOpenProposal}
       onOpenAutotask={onOpenAutotask}
-      onStopSubagent={onStopSubagent}
     />
   )
 
@@ -3310,17 +3315,7 @@ function Conversation({
             ) : (
               <>
                 {messages.map((m, i) => renderMsg(m, i, turnOf[i]))}
-                {streaming && (
-                  <StatusIndicator
-                    activity={deriveActivity(messages)}
-                    status={streamStatus}
-                    folded={
-                      messages[messages.length - 1]?.role === 'assistant' &&
-                      hasProcess(messages[messages.length - 1].blocks)
-                    }
-                    onStop={onStop}
-                  />
-                )}
+                {!folded && statusLine}
                 {/* 已有对话但模型被删光：引导卡接在末尾（不进对话记录）。 */}
                 {needModelSetup && !streaming && <ModelSetupCard />}
               </>
@@ -3572,6 +3567,13 @@ function UserText({ text }: { text: string }): React.JSX.Element {
   )
 }
 
+/**
+ * 进行中消息出现这些元素时不撑住高度（见 ConvMessage）：工作过程里用户展开着的节点 / 折叠条，
+ * 以及还在等用户处置的问答、计划、挂载卡。
+ */
+const NO_HOLD =
+  '.msg__process [aria-expanded="true"], .ask:not(.is-answered), .msg__plan:not(.is-decided), .msg__mount:not(.is-decided)'
+
 /** 单条消息：IM 头像外壳 + 复用 features/chat/blocks 的 BlockView（安全渲染器不重写）。 */
 function ConvMessage({
   msg,
@@ -3579,13 +3581,13 @@ function ConvMessage({
   active,
   latest,
   elapsedSec,
+  footer,
   dataTurn,
   onAsk,
   onPlan,
   onMountReq,
   onOpenProposal,
-  onOpenAutotask,
-  onStopSubagent
+  onOpenAutotask
 }: {
   msg: ChatMessage
   owner?: Persona
@@ -3594,6 +3596,8 @@ function ConvMessage({
   latest: boolean
   /** 本轮已用秒数（进行中的折叠条标题末尾显示；只对 active 的消息有意义）。 */
   elapsedSec: number
+  /** 接在消息内容末尾的底部状态行（等待作答 / 重连 / 压缩；只交给进行中且已有折叠条的那条）。 */
+  footer?: React.ReactNode
   /** 该消息所属的对话轮下标（0 基）；标注在根节点上，供右键菜单定位「删除此轮」。前言/未知为 undefined。 */
   dataTurn?: number
   onAsk: (key: string, answers: string[]) => void
@@ -3601,34 +3605,59 @@ function ConvMessage({
   onMountReq: (key: string, path: string | null) => void
   onOpenProposal: (block: Extract<ChatBlock, { kind: 'agentcard' }>) => void
   onOpenAutotask: (taskId: string) => void
-  onStopSubagent: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   // 「工作过程」是否展开：进行中与结束后都默认收起；用户点开后在本次挂载内保持（跨过回合结束也不变）。
   const [processOpen, setProcessOpen] = useState(false)
   // 进行中消息高度只增不减：当前步骤区域随内容伸缩（5 个并行工具 → 1 行思考 → 1 个工具）、中间说明收进
   // 折叠条，都会让消息变矮，页面跟着上下拉扯。故把本轮出现过的最大高度记作最小高度，空出的地方留在消息
-  // 底部。回合结束时也先不释放（最终回复很短时会一下缩掉一大截），等它不再是最后一条（下一轮开始）再释放。
-  // 用户在消息里点了按钮（开合折叠条、思考 / 子智能体节点、各种卡片）也释放：那是有意的伸缩，
+  // 底部。回合结束后用 0.25s 平滑收回到实际高度（直接释放的话，最终回复很短时会一下缩掉一大截）。
+  // 用户在消息里点了按钮（开合折叠条、思考 / 子智能体节点、各种卡片）立即释放：那是有意的伸缩，
   // 否则点开思考再收起，撑高的那截会一直留着，「回到最新」就落到一片空白上。
+  // 以下两种情况不记高度（见 NO_HOLD），恢复后从当时的高度重新记：
+  // · 工作过程里有用户展开着的东西（折叠条本身、计划 / 思考 / 提问等节点）：展开的节点可能随后被自动换掉
+  //   （当前步骤前进到下一步），它撑出的高度不该留下。
+  // · 有等你处置的问答 / 计划 / 挂载卡：回合停着等你，本无抖动可防；处置后卡片收进折叠条是你造成的收缩，
+  //   而且常是在输入框里按回车提交，不经过按钮点击，上面的释放管不到。
   const contentRef = useRef<HTMLDivElement>(null)
   const peakRef = useRef(0)
   const releasePeak = (): void => {
     peakRef.current = 0
-    if (contentRef.current) contentRef.current.style.minHeight = ''
+    const el = contentRef.current
+    if (!el) return
+    el.style.transition = ''
+    el.style.minHeight = ''
   }
   useLayoutEffect(() => {
     const el = contentRef.current
-    if (!active || !el) return
-    const ro = new ResizeObserver(() => {
-      const h = el.getBoundingClientRect().height
-      if (h > peakRef.current) {
-        peakRef.current = h
-        el.style.minHeight = `${h}px`
-      }
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
+    if (!el) return
+    if (active) {
+      const ro = new ResizeObserver(() => {
+        if (el.querySelector(NO_HOLD)) {
+          if (peakRef.current) releasePeak()
+          return
+        }
+        const h = el.getBoundingClientRect().height
+        if (h > peakRef.current) {
+          peakRef.current = h
+          el.style.minHeight = `${h}px`
+        }
+      })
+      ro.observe(el)
+      return () => ro.disconnect()
+    }
+    // 回合结束：撑住的空白平滑收回。先量出不撑时的实际高度，再从撑住的高度过渡过去。
+    const held = el.style.minHeight
+    if (!held) return
+    releasePeak()
+    const natural = el.getBoundingClientRect().height
+    if (natural >= parseFloat(held) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.style.minHeight = held
+    void el.getBoundingClientRect() // 让过渡从撑住的高度起步
+    el.style.transition = 'min-height 0.25s ease'
+    el.style.minHeight = `${natural}px`
+    const timer = setTimeout(releasePeak, 300)
+    return () => clearTimeout(timer)
   }, [active])
   useLayoutEffect(() => {
     if (!latest) releasePeak()
@@ -3683,12 +3712,7 @@ function ConvMessage({
   const renderBlocks = (blocks: ChatBlock[], notesInline = false): React.ReactNode =>
     groupBlocks(blocks, notesInline).map((item) =>
       item.type === 'timeline' ? (
-        <Timeline
-          key={item.key}
-          steps={item.steps}
-          liveBlock={liveBlock}
-          onStopSubagent={onStopSubagent}
-        />
+        <Timeline key={item.key} steps={item.steps} liveBlock={liveBlock} />
       ) : (
         <BlockView
           key={item.index}
@@ -3699,7 +3723,6 @@ function ConvMessage({
           onMountReq={onMountReq}
           onOpenProposal={onOpenProposal}
           onOpenAutotask={onOpenAutotask}
-          onStopSubagent={onStopSubagent}
         />
       )
     )
@@ -3713,7 +3736,6 @@ function ConvMessage({
         liveBlock={liveBlock}
         compact
         limit={5}
-        onStopSubagent={onStopSubagent}
       />
     ) : undefined
   return (
@@ -3748,6 +3770,7 @@ function ConvMessage({
           ) : (
             renderBlocks(msg.blocks)
           )}
+          {footer}
         </div>
       </div>
     </div>
@@ -4085,8 +4108,11 @@ function Composer({
             <div className="cf-slash__hint">{t('cf.slash.hint')}</div>
           </div>
         )}
-        {/* 待办清单进度胶囊：有进行中的清单才出现，点开向上展开清单面板。 */}
-        <TodoCapsule />
+        {/* 输入框上方的胶囊排：待办清单进度（有进行中的清单才出现）+ 后台任务（有后台运行的子智能体才出现）。 */}
+        <div className="cf-dock">
+          <TodoCapsule />
+          <BackgroundCapsule />
+        </div>
         <div className="cf-box">
           {/* 拖拽手柄压在输入框上边框：向上拖加高输入框。 */}
           <ResizeHandle

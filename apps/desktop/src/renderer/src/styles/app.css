@@ -606,6 +606,10 @@ textarea {
   flex-shrink: 0;
   animation: deva-pulse 1.2s ease-in-out infinite;
 }
+/* 接在进行中消息末尾时（已有工作过程折叠条）：跟在步骤与卡片后面，不再用列表间距的负外边距 */
+.msg__content > .chat__status {
+  margin-top: var(--space-3);
+}
 .chat__status-time {
   margin-left: auto;
   font-size: 12px;
@@ -1237,16 +1241,6 @@ textarea {
 .tl__main {
   min-width: 0;
 }
-/* 子智能体节点：折叠按钮之外，后台运行时右侧另有停止键（不能嵌在折叠按钮里） */
-.tl__head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.tl__head > .tl__line {
-  flex: 0 1 auto;
-}
 .tl__line {
   display: flex;
   align-items: center;
@@ -1334,31 +1328,8 @@ button.tl__line:hover {
   color: var(--fg-subtle);
   transition: transform 0.15s ease;
 }
-.tl__item.is-open > .tl__main > .tl__line .tl__caret,
-.tl__item.is-open > .tl__main > .tl__head > .tl__line .tl__caret {
+.tl__item.is-open > .tl__main > .tl__line .tl__caret {
   transform: rotate(90deg);
-}
-.tl__stop {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 var(--space-2);
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--fg-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-}
-.tl__stop:hover:not(:disabled) {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.tl__stop:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 .tl__body {
   margin-top: var(--space-1);
@@ -1377,6 +1348,49 @@ button.tl__line:hover {
 .tl__think-live.is-overflow {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.6em);
   mask-image: linear-gradient(to bottom, transparent 0, #000 1.6em);
+}
+/* 已作答提问展开后的逐题回述：问题弱一档，答案在下 */
+.tl__qa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+.tl__qa-q {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-subtle);
+}
+.tl__qa-a {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 已决计划展开后的全文与回复：标题压到正文大小、去掉下划线，别在时间轴里显得比回复还重 */
+.tl__plan .md {
+  font-size: 13px;
+}
+.tl__plan .md :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-2) 0 var(--space-1);
+  padding-bottom: 0;
+  border-bottom: none;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.tl__feedback {
+  margin-top: var(--space-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tl__feedback-label {
+  margin-right: 6px;
+  color: var(--fg-subtle);
 }
 .tl__item--more .tl__line {
   font-size: 12.5px;

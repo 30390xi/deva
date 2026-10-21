@@ -304,6 +304,19 @@ const zhCN: MessageTree = {
       // 后台任务通知行的兜底文案（主进程通常会给出具体标题）。
       notify: '后台任务已结束'
     },
+    // 输入框上方的后台任务胶囊（后台运行中的子智能体）。胶囊本身已表明在后台运行，标签写「子智能体」说明是什么在跑；
+    // 面板标题仍带「后台」，说明前台运行的子智能体不在这里。
+    bg: {
+      label: '子智能体',
+      title: '后台子智能体',
+      count: '{n} 个子智能体',
+      stopAll: '全部停止',
+      stopAllHint: '停止全部后台子智能体（它们停止前的输出会随下一条消息交给主智能体）',
+      // 面板里还没有内部步骤（刚派出，或重新载入后步骤已不在）时，任务下面那一行的文字。
+      working: '进行中',
+      // 同时执行好几个工具时，当前步骤那行只写一个，后缀总数。
+      more: '等 {n} 项'
+    },
     // 时间轴上每步一行：「动词 + 对象」。done=已完成，doing=执行中（扫光），base=失败时接「失败：原因」。
     flow: {
       done: {
@@ -364,7 +377,18 @@ const zhCN: MessageTree = {
         unknown: '调用'
       },
       failed: '失败',
-      failedWith: '失败：{reason}'
+      failedWith: '失败：{reason}',
+      // 处置过的计划 / 挂载请求收进工作过程后的节点文字。
+      plan: {
+        approve: '已批准计划',
+        keep: '已要求继续完善计划',
+        ignore: '已忽略计划',
+        cancelled: '计划已取消'
+      },
+      mount: {
+        mounted: '已挂载工作区',
+        skipped: '未挂载工作区'
+      }
     },
     process: {
       // 折叠条标题：进行中「处理中 · 7 步」，结束后「已处理 1 分 12 秒 · 7 步」；没记录耗时的旧对话回落为「已执行 7 步」。
@@ -1374,6 +1398,15 @@ const en: MessageTree = {
       stopHint: 'Stop this background subagent (its output so far goes to the main agent with your next message)',
       notify: 'Background task finished'
     },
+    bg: {
+      label: 'Subagent',
+      title: 'Background subagents',
+      count: '{n} subagents',
+      stopAll: 'Stop all',
+      stopAllHint: 'Stop all background subagents (their output so far goes to the main agent with your next message)',
+      working: 'Working',
+      more: '· {n} in parallel'
+    },
     flow: {
       done: {
         readFile: 'Read',
@@ -1433,7 +1466,17 @@ const en: MessageTree = {
         unknown: 'Call'
       },
       failed: 'failed',
-      failedWith: 'failed: {reason}'
+      failedWith: 'failed: {reason}',
+      plan: {
+        approve: 'Approved plan',
+        keep: 'Asked to refine plan',
+        ignore: 'Ignored plan',
+        cancelled: 'Plan cancelled'
+      },
+      mount: {
+        mounted: 'Mounted workspace',
+        skipped: 'Skipped mounting workspace'
+      }
     },
     process: {
       live: 'Working',
