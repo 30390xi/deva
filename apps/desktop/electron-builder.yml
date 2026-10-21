@@ -65,3 +65,13 @@ linux:
   target:
     - AppImage
   category: Development
+  # 可执行文件名默认取 package.json 的 name（@deva/desktop → @devadesktop），带 @ 与 / 无法用于文件路径，
+  # AppImage 打包会直接失败；显式给一个干净的名字。
+  executableName: deva
+  # 1024×1024 png，electron-builder 自动生成各尺寸图标
+  icon: build/icon.png
+  # 让 .desktop 文件名与 Electron 的 app_id / WM_CLASS 对齐，任务栏才能把窗口归到 Deva 图标下
+  # （desktopName 本身在 apps/desktop/package.json 里）
+  syncDesktopName: true
+  # AppImage 文件名带架构，以后加 arm64 也不会重名
+  artifactName: ${productName}-${version}-${arch}.${ext}

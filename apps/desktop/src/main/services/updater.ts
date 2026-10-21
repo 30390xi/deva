@@ -67,7 +67,7 @@ function canAutoInstall(): boolean {
   return process.platform === 'win32' && app.isPackaged && installedByNsis()
 }
 
-/** 本机该下载的文件名（安装包 / 便携版 zip）；没有对应文件的平台返回 null（只能打开 Release 页面）。 */
+/** 本机该下载的文件名（安装包 / 便携版 zip / AppImage）；没有对应文件的平台返回 null（只能打开 Release 页面）。 */
 function installerName(version: string): string | null {
   if (process.platform === 'win32')
     return isPortable() ? `Deva-${version}-portable.zip` : `Deva-${version}-setup.exe`
@@ -75,6 +75,13 @@ function installerName(version: string): string | null {
     // x64 版经 Rosetta 跑在 Apple 芯片上时 process.arch 也是 x64，改推原生的 arm64 包
     const arm = process.arch === 'arm64' || app.runningUnderARM64Translation
     return `Deva-${version}-${arm ? 'arm64' : 'x64'}.dmg`
+  }
+  // Linux：AppImage 文件名带架构（见 electron-builder.yml 的 linux.artifactName）。
+  // 注意 electron-builder 对 AppImage 用的是 Linux 架构名（x64 → x86_64、arm64 仍是 arm64），
+  // 不是 Windows/macOS 那套 x64。下载后是用户自己替换文件，不做应用内自动安装。
+  if (process.platform === 'linux') {
+    const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'i386' : 'x86_64'
+    return `Deva-${version}-${arch}.AppImage`
   }
   return null
 }

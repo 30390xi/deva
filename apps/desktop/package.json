@@ -5,6 +5,7 @@
   "main": "./out/main/index.js",
   "author": "sqfcy",
   "license": "MIT",
+  "desktopName": "deva.desktop",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

@@ -3,7 +3,15 @@ import { AlertTriangle, CheckCircle2, Download, ExternalLink, Loader2, RefreshCw
 import { useI18n } from '../i18n/i18n'
 import { RELEASES_URL, type UpdateState } from '../../../shared/update'
 
-const IS_MAC = navigator.userAgent.includes('Mac')
+const PLATFORM = window.deva?.platform ?? (navigator.userAgent.includes('Mac') ? 'darwin' : '')
+const IS_MAC = PLATFORM === 'darwin'
+const IS_LINUX = PLATFORM === 'linux'
+/** 手动更新时的说明文案：各平台的「下载之后怎么装」不一样。 */
+const MANUAL_HINT_KEY = IS_MAC
+  ? 'settings.update.manualHintMac'
+  : IS_LINUX
+    ? 'settings.update.manualHintLinux'
+    : 'settings.update.manualHint'
 
 /**
  * 关于页的「检查更新」：只在点按钮时检查。状态由主进程持有（services/updater.ts），这里只展示与触发——
@@ -56,11 +64,7 @@ export function UpdateSection(): React.JSX.Element {
               ? t('settings.update.downloadPortable')
               : t('settings.update.downloadInstaller')}
         </button>
-        {mode === 'manual' && (
-          <p className="cf-update__hint">
-            {IS_MAC ? t('settings.update.manualHintMac') : t('settings.update.manualHint')}
-          </p>
-        )}
+        {mode === 'manual' && <p className="cf-update__hint">{t(MANUAL_HINT_KEY)}</p>}
         {mode === 'portable' && (
           <p className="cf-update__hint">{t('settings.update.portableHint')}</p>
         )}
