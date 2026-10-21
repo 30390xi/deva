@@ -68,7 +68,7 @@ const TOOL_META: Record<string, { key: string; icon: LucideIcon }> = {
   memory_delete: { key: 'memoryDelete', icon: Brain },
   // 正常的 todo_write 不画工具节点（进度在胶囊里）；只有参数被输出上限截断的那次会以普通工具节点出现。
   todo_write: { key: 'todoWrite', icon: ListChecks },
-  // 成功的 present_files 画交付卡；执行中 / 失败（路径不对）时以普通工具节点出现。
+  // present_files 在时间轴上与普通工具一样是一步；成功的交付另在回合结束后于回复末尾画交付卡（见 deliveries）。
   present_files: { key: 'presentFiles', icon: Package }
 }
 
@@ -400,9 +400,6 @@ export function BlockView({
       </div>
     )
   }
-
-  if (block.kind === 'tool' && block.name === 'present_files' && block.status === 'ok')
-    return <DeliverablesCard block={block} />
 
   // 思考 / 工具调用 / 子智能体通常由 groupBlocks 归进时间轴；单独交到这里时画成只有一个节点的时间轴。
   if (block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'subagent') {
@@ -1308,13 +1305,12 @@ export type BlockItem =
   | { type: 'timeline'; steps: TimelineStep[]; key: string }
 
 /**
- * 进时间轴的块：思考、工具调用（成功的交付除外，它是交付卡）、子智能体，以及已经处置过的提问 / 计划 /
+ * 进时间轴的块：思考、工具调用（含交付，交付卡另见 DeliveryCards）、子智能体，以及已经处置过的提问 / 计划 /
  * 挂载请求（还在等你处置时是对话里的卡片）。
  */
 function isTimelineStep(b: ChatBlock): boolean {
   switch (b.kind) {
     case 'tool':
-      return !(b.name === 'present_files' && b.status === 'ok')
     case 'thinking':
     case 'subagent':
       return true
@@ -1364,9 +1360,10 @@ export function groupBlocks(blocks: ChatBlock[], notesInline = false): BlockItem
 }
 
 /**
- * 不折进「工作过程」的块：角色 / 任务名片、交付卡、错误与回合提示、还在等你处置的问答 / 计划 / 挂载卡——
+ * 不折进「工作过程」的块：角色 / 任务名片、错误与回合提示、还在等你处置的问答 / 计划 / 挂载卡——
  * 这些是要用户看到或处理的结果，不是过程。问答 / 计划 / 挂载卡处置完就成了过程的一步，收进折叠条。
  * 后台运行的子智能体也是过程的一步（停止键在输入框上方的后台任务胶囊里，不在对话流中）。
+ * 交付调用同样是过程的一步，交付卡不在块序列的原位置上画，回合结束后排在回复末尾（见 DeliveryCards）。
  */
 function isPinned(b: ChatBlock): boolean {
   switch (b.kind) {
@@ -1381,11 +1378,28 @@ function isPinned(b: ChatBlock): boolean {
     case 'plan':
     case 'mount':
       return !b.decided
-    case 'tool':
-      return b.name === 'present_files' && b.status === 'ok'
     default:
       return false
   }
+}
+
+/** 成功的交付（present_files）：回合结束后在回复末尾画交付卡。 */
+function isDelivery(b: ChatBlock): b is Extract<ChatBlock, { kind: 'tool' }> {
+  return b.kind === 'tool' && b.name === 'present_files' && b.status === 'ok'
+}
+
+/**
+ * 本轮的交付卡，按调用顺序排在回复末尾；由调用方只在回合结束后渲染——进行中交付只是时间轴上的一步。
+ * 工具描述据此告诉模型「交付卡在本轮回复结束后显示在回复末尾」（main/services/tools.ts），改位置时一并改。
+ */
+export function DeliveryCards({ blocks }: { blocks: ChatBlock[] }): React.JSX.Element {
+  return (
+    <>
+      {blocks.filter(isDelivery).map((b) => (
+        <DeliverablesCard key={b.id} block={b} />
+      ))}
+    </>
+  )
 }
 
 /** 算「过程」的块：时间轴上的各步、已完成的待办清单（固定展示的除外）。 */
@@ -1404,7 +1418,7 @@ export function hasProcess(blocks: ChatBlock[]): boolean {
  * 其后的正文即最终回复；固定块无论位置都留在外面，保持原相对顺序。进行中与结束后同一套切法——
  * 进行中时夹在工具调用之间的说明一旦后面又有了工具调用，就随之收进折叠条。
  * 没有过程块 → null，按原样逐块渲染。已结束回合折叠后外面什么都不剩（如中断在工具调用上）也返回 null；
- * 进行中（live）不看这一条：回复还没写出来是常态。
+ * 末尾的交付卡算外面有东西（交付完没再写字也照常折叠）。进行中（live）不看这一条：回复还没写出来是常态。
  */
 export function splitProcess(
   blocks: ChatBlock[],
@@ -1422,7 +1436,8 @@ export function splitProcess(
     else visible.push(b)
   })
   if (live) return { process, visible }
-  const hasVisible = visible.some((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim()))
+  const hasVisible =
+    blocks.some(isDelivery) || visible.some((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim()))
   return hasVisible ? { process, visible } : null
 }
 

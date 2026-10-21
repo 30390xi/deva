@@ -127,6 +127,7 @@ import { useTheme } from '../theme/ThemeContext'
 import {
   BlockView,
   CompactionNotice,
+  DeliveryCards,
   ProcessFold,
   StatusIndicator,
   Timeline,
@@ -3726,7 +3727,8 @@ function ConvMessage({
         />
       )
     )
-  // 思考 / 工具调用等过程收进「工作过程」折叠条，名片、交付卡等固定块与回复正文留在外面（见 splitProcess）。
+  // 思考 / 工具调用等过程收进「工作过程」折叠条，名片等固定块与回复正文留在外面（见 splitProcess）；
+  // 交付卡在回合结束后排在最后（见 DeliveryCards）。
   // 进行中同样默认收起，收起时折叠条下露出当前步骤（并行执行的一并列出，最多 5 行，见 currentSteps）。
   const split = splitProcess(msg.blocks, active)
   const preview =
@@ -3770,6 +3772,7 @@ function ConvMessage({
           ) : (
             renderBlocks(msg.blocks)
           )}
+          {!active && <DeliveryCards blocks={msg.blocks} />}
           {footer}
         </div>
       </div>

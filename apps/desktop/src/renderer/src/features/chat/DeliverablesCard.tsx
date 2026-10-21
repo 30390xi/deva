@@ -16,7 +16,7 @@ import { useToast } from '../../components/ToastProvider'
 import type { DeliverableInfo } from '../../../../shared/deliverables'
 
 /**
- * 交付卡（present_files 成功后）：模型在任务收尾时交付给用户的成品文件，每个一行——
+ * 交付卡（present_files 成功后，回合结束时排在回复末尾，见 DeliveryCards）：模型交付给用户的成品文件，每个一行——
  * 缩略图（系统缩略图 / 文件图标）、文件名、大小与所在目录，操作：打开 / 在文件夹中显示 / 复制路径。
  * 卡片内容取自主进程（按对话 id + 调用 id 从历史里取路径），重开对话同样还原；文件被移走则标「已不存在」。
  */
