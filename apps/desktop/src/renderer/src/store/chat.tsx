@@ -214,6 +214,8 @@ export interface ChatMessage {
    * 但展示为一行系统通知而非用户气泡，正文为通知标题。
    */
   notify?: boolean
+  /** 助手消息：本轮耗时（毫秒，主进程计时、扣除等用户处置的时间），工作过程折叠条据此显示「已处理 X」。 */
+  durationMs?: number
 }
 
 /** 会话元信息（左侧列表用）。 */
@@ -292,7 +294,7 @@ type DisplayBlock =
   | { kind: 'todolist'; id: string; title: string; items: TodoItem[] }
 type DisplayMessage =
   | { role: 'user'; text: string; attachments: { name: string; kind: AttachKind }[]; notify?: true }
-  | { role: 'assistant'; blocks: DisplayBlock[] }
+  | { role: 'assistant'; blocks: DisplayBlock[]; durationMs?: number }
 
 /** 与 preload/主进程 ChatStreamEvent 结构一致（按既定模式在渲染层复述线缆类型）。 */
 type StreamEvent =
@@ -363,7 +365,7 @@ type StreamEvent =
       type: 'turn_start'
       user: { text: string; attachments: { name: string; kind: AttachKind }[]; notify?: true }
     }
-  | { type: 'done'; stopReason: string }
+  | { type: 'done'; stopReason: string; durationMs?: number }
 
 /**
  * 交互卡已在别处答复（手机端 / 本层自己的答复回执）：把同 key 的卡收成已决态。
@@ -568,7 +570,12 @@ function displayToMessages(dms: DisplayMessage[]): ChatMessage[] {
       if (isSubagentCall(b.name)) return subagentBlock(b.id, b.name, b.args, status, b.summary)
       return { kind: 'tool', id: b.id, name: b.name, args: b.args, status, summary: b.summary }
     })
-    return { id: genId(), role: 'assistant', blocks }
+    return {
+      id: genId(),
+      role: 'assistant',
+      blocks,
+      ...(dm.durationMs !== undefined ? { durationMs: dm.durationMs } : {})
+    }
   })
 }
 
@@ -861,6 +868,15 @@ function updateLastAssistant(
   if (nextBlocks === last.blocks) return list
   const copy = list.slice()
   copy[copy.length - 1] = { ...last, blocks: nextBlocks }
+  return copy
+}
+
+/** 给末条助手消息记下本轮耗时（done 事件带来）；末条不是助手消息或没有耗时则原样返回。 */
+function setLastDuration(list: ChatMessage[], durationMs: number | undefined): ChatMessage[] {
+  const last = list[list.length - 1]
+  if (durationMs === undefined || !last || last.role !== 'assistant') return list
+  const copy = list.slice()
+  copy[copy.length - 1] = { ...last, durationMs }
   return copy
 }
 
@@ -1327,8 +1343,11 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
             // 交互卡（用户中断时最常见），再据终止原因补「中断说明」：截断/空回合给出可见提示，正常回合原样短路。
             messages: compactDrop
               ? dropEmptyAssistantTail(r.messages)
-              : updateLastAssistant(settleOpenCards(r.messages), (b) =>
-                  appendTerminalNotice(b, ev.stopReason)
+              : setLastDuration(
+                  updateLastAssistant(settleOpenCards(r.messages), (b) =>
+                    appendTerminalNotice(b, ev.stopReason)
+                  ),
+                  ev.durationMs
                 )
           }))
           // 与重开同形：早期气泡当场收成一个摘要气泡。主进程在发 done 后同步补记终态提示并落盘，

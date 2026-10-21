@@ -116,6 +116,12 @@ export interface StoredSession {
    */
   background?: Record<string, 'running' | 'ok' | 'error'>
   /**
+   * 回合耗时边车（毫秒），按该轮第一个 tool_use 的 id 记录：工作过程折叠条显示「已处理 X」。
+   * 扣除了等用户作答 / 批准计划 / 挂载工作区的时间，只算 Deva 自己在干活的时长。没有工具调用的轮不记——
+   * 重开后它没有可折叠的过程（思考块不重建）。按轮删除时随 tool_use 修剪。
+   */
+  durations?: Record<string, number>
+  /**
    * @deprecated 已废弃的「项目分桶键」（旧 IDE 式外壳遗留）。对话优先外壳无项目概念、`listSessions` 列全部，
    * 故此字段不再读写；仅为兼容历史 JSON 保留可选声明（读时忽略、新存不产生）。见文件头注释。
    */

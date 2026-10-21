@@ -347,7 +347,8 @@ export type DisplayMessage =
       /** 后台任务通知（见 NOTIFY_MARKER）：展示为一行系统通知而非用户气泡，text 为其标题。 */
       notify?: true
     }
-  | { role: 'assistant'; blocks: DisplayBlock[] }
+  /** durationMs：本轮耗时（来自 durations 边车），工作过程折叠条据此显示「已处理 X」；未记录则缺省。 */
+  | { role: 'assistant'; blocks: DisplayBlock[]; durationMs?: number }
 
 /** StoredNotice → 展示块（错误红框 / 弱化提示）。 */
 function noticeToBlock(nt: StoredNotice): DisplayBlock {
@@ -373,7 +374,8 @@ function toDisplayMessages(
   todos: TodoEntry[] = [],
   /** 子智能体 id → 类型与任务标题（来自子智能体记录索引），给续聊卡补标题。 */
   subagentLookup?: (id: string) => { agent: string; description: string } | undefined,
-  background: Record<string, 'running' | 'ok' | 'error'> = {}
+  background: Record<string, 'running' | 'ok' | 'error'> = {},
+  durations: Record<string, number> = {}
 ): DisplayMessage[] {
   const out: DisplayMessage[] = []
   let lastAssistant: Extract<DisplayMessage, { role: 'assistant' }> | null = null
@@ -501,6 +503,9 @@ function toDisplayMessages(
         out.push(msg)
         lastAssistant = msg
       }
+      // 耗时记在本轮第一个 tool_use 上，落到它所在的展示气泡（一轮一气泡）。
+      for (const p of parts)
+        if (p.type === 'tool_use' && durations[p.id] !== undefined) lastAssistant.durationMs = durations[p.id]
       return
     }
 
@@ -647,6 +652,7 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
     // 检查点记录同样按 toolUseId 归属，随轮一并清空（lastKnown / baselines 描述的是磁盘现状，保留）。
     s.checkpoints = {}
     s.background = {}
+    s.durations = {}
     cancelBackground(s.id)
     pruneSubagents(s.id, new Set())
     s.updatedAt = Date.now()
@@ -705,6 +711,7 @@ function deleteTurns(s: StoredSession, turnIndices: number[]): void {
   // 被删轮的检查点记录随之丢弃：它们的文件改动留在磁盘上，此后不再能经回滚撤回。
   s.checkpoints = prune(s.checkpoints)
   s.background = prune(s.background)
+  s.durations = prune(s.durations)
   // 派发在被删轮次里、仍在后台跑的子智能体就地中止（不再通知）；创建或续聊发生在被删轮次的子智能体整条删除：
   // 删掉的内容模型不再看到，子智能体的上下文里也不该留着。
   cancelBackground(s.id, liveUseIds)
@@ -1041,7 +1048,8 @@ export type ChatStreamEvent =
       /** notify：本轮由后台任务通知自动发起（见 NOTIFY_MARKER），text 为通知标题。 */
       user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[]; notify?: true }
     }
-  | { type: 'done'; stopReason: StopReason }
+  /** durationMs：本轮耗时（扣除等用户处置的时间），渲染层据此给工作过程折叠条显示「已处理 X」。 */
+  | { type: 'done'; stopReason: StopReason; durationMs?: number }
 
 // 主对话与子智能体的单轮工具步数上限：Infinity = 不设上限，一直循环到模型不再调用工具为止（对标
 // Claude Code 的 agentic loop）。天然刹车 = 用户随时可中止（主轮的停止键；后台子智能体在其 Task 卡上
@@ -1194,6 +1202,27 @@ const pendingMount = new Map<
   string,
   { resolve: (path: string | null) => void; turnId: string; sessionId: string }
 >()
+/** 各轮累计在等用户处置（作答 / 批准计划 / 挂载工作区）上的毫秒数：回合耗时要把它扣掉。轮结束即删。 */
+const turnWaitMs = new Map<string, number>()
+
+/** 等用户处置的那段时间记到所属轮次上（见 turnWaitMs）。 */
+function timedWait<T>(turnId: string, wait: Promise<T>): Promise<T> {
+  const t0 = Date.now()
+  return wait.finally(() => turnWaitMs.set(turnId, (turnWaitMs.get(turnId) ?? 0) + Date.now() - t0))
+}
+
+/** 本轮耗时记进 durations 边车，键为本轮（turnStart 起）第一个 tool_use 的 id；没有工具调用则不记。 */
+function recordTurnDuration(s: StoredSession, turnStart: number, ms: number): void {
+  for (let i = turnStart; i < s.messages.length; i++) {
+    const m = s.messages[i]
+    if (m.role !== 'assistant' || typeof m.content === 'string') continue
+    const use = m.content.find((p) => p.type === 'tool_use')
+    if (use && use.type === 'tool_use') {
+      s.durations = { ...s.durations, [use.id]: ms }
+      return
+    }
+  }
+}
 /**
  * 已明确拒绝过挂载的会话（内存态，随重启清空）。会话级去重：用户点过一次「暂不挂载」后，
  * 同会话后续同类调用只回灌文案、绝不再弹卡——否则一个多步循环会连弹好几张，比不提示还烦。
@@ -1348,6 +1377,7 @@ interface RewindUndo {
     summaries: StoredSession['summaries']
     delivered: StoredSession['delivered']
     background: StoredSession['background']
+    durations: StoredSession['durations']
     plans: StoredSession['plans']
     autotasks: StoredSession['autotasks']
     todos: StoredSession['todos']
@@ -2019,7 +2049,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     const key = genId('ask')
     emit(turnId, sessionId, { type: 'ask_user', key, questions })
     notifyPending(turnId, sessionId, { kind: 'ask', questions: questions.map((q) => q.question) })
-    return new Promise((resolve) => pendingAsk.set(key, { resolve, turnId, sessionId }))
+    return timedWait(turnId, new Promise((resolve) => pendingAsk.set(key, { resolve, turnId, sessionId })))
   }
 
   /**
@@ -2034,7 +2064,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     const key = genId('plan')
     emit(turnId, sessionId, { type: 'plan_review', key, plan })
     notifyPending(turnId, sessionId, { kind: 'plan' })
-    return new Promise((resolve) => pendingPlan.set(key, { resolve, turnId, sessionId }))
+    return timedWait(turnId, new Promise((resolve) => pendingPlan.set(key, { resolve, turnId, sessionId })))
   }
 
   /**
@@ -2051,7 +2081,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     const key = genId('mount')
     emit(turnId, sessionId, { type: 'mount_request', key, tool, path })
     notifyPending(turnId, sessionId, { kind: 'mount' })
-    return new Promise((resolve) => pendingMount.set(key, { resolve, turnId, sessionId }))
+    return timedWait(turnId, new Promise((resolve) => pendingMount.set(key, { resolve, turnId, sessionId })))
   }
 
   /**
@@ -3207,6 +3237,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     fromRemote = false
   ): Promise<void> {
     const controller = new AbortController()
+    const startedAt = Date.now()
     activeTurns.set(turnId, controller)
     busySessions.set(sessionId, turnId)
     if (fromRemote) remoteTurns.add(turnId)
@@ -3296,6 +3327,14 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       }
       else if ((stopReason === 'end_turn' || stopReason === 'stop') && !turnProducedVisible())
         notices.push({ after, kind: 'notice', code: 'empty' })
+    }
+
+    // 本轮耗时：起轮到此刻，扣掉等用户处置的时间；记进 durations 边车（finally 一并落盘）并随 done 发出。
+    const finishDuration = (): number => {
+      const ms = Math.max(0, Date.now() - startedAt - (turnWaitMs.get(turnId) ?? 0))
+      turnWaitMs.delete(turnId)
+      recordTurnDuration(session, turnStart, ms)
+      return ms
     }
 
     // 本轮 persona 快照（仅主智能体）：
@@ -3397,7 +3436,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           turnStart = lastTurnStart(history) + 1
         })
       })
-      emit(turnId, sessionId, { type: 'done', stopReason })
+      emit(turnId, sessionId, { type: 'done', stopReason, durationMs: finishDuration() })
       // 终态提示持久化（须在 finally 落盘前执行）：错误红框 / 截断 / 空回合入 notices 边车。
       recordTurnNotice(stopReason, errorMessage)
       endReason = stopReason
@@ -3406,12 +3445,13 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     } catch (e) {
       const message = (e as Error)?.message ?? String(e)
       emit(turnId, sessionId, { type: 'error', kind: 'unknown', message })
-      emit(turnId, sessionId, { type: 'done', stopReason: 'error' })
+      emit(turnId, sessionId, { type: 'done', stopReason: 'error', durationMs: finishDuration() })
       recordTurnNotice('error', message)
       replyError = message
     } finally {
       activeTurns.delete(turnId)
       remoteTurns.delete(turnId)
+      turnWaitMs.delete(turnId)
       // 记录本轮真实输入 token 作为下轮压缩触发依据（比字符估算准，天然覆盖图片/工具）。
       // 缓存命中/写入量是纯观测字段（不参与任何判定），与 token 数同源同步——本轮没拿到真实
       // 用量（如秒中止）就整体不动，免得用 0 覆盖掉上一轮的有效读数。
@@ -3457,6 +3497,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
   async function runScheduledTurn(task: TaskRecord): Promise<ScheduledTurnResult> {
     const turnId = genId('turn')
     const controller = new AbortController()
+    const startedAt = Date.now()
     activeTurns.set(turnId, controller)
     const auth = task.auth
     const sessionId = task.sessionId
@@ -3527,6 +3568,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     let lastCacheRead = 0
     let lastCacheWrite = 0
     let result: ScheduledTurnResult = { stopReason: 'end_turn', text: '' }
+    // 本轮耗时（密封执行不等用户，无需扣除）：压缩可能重排历史，轮起点按结束时的历史重新定位。
+    const finishDuration = (): number => {
+      const ms = Date.now() - startedAt
+      recordTurnDuration(session, lastTurnStart(history) + 1, ms)
+      return ms
+    }
     try {
       const { text, stopReason, errorMessage } = await runAgentLoop({
         turnId,
@@ -3553,12 +3600,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           lastInput = 0
         })
       })
-      emit(turnId, sessionId, { type: 'done', stopReason })
+      emit(turnId, sessionId, { type: 'done', stopReason, durationMs: finishDuration() })
       result = { stopReason, text, errorMessage }
     } catch (e) {
       const message = (e as Error)?.message ?? String(e)
       emit(turnId, sessionId, { type: 'error', kind: 'unknown', message })
-      emit(turnId, sessionId, { type: 'done', stopReason: 'error' })
+      emit(turnId, sessionId, { type: 'done', stopReason: 'error', durationMs: finishDuration() })
       result = { stopReason: 'error', text: '', errorMessage: message }
     } finally {
       activeTurns.delete(turnId)
@@ -3814,7 +3861,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       s.autotasks ?? {},
       s.todos ?? [],
       (to) => getSubagentMeta(s.id, to),
-      s.background ?? {}
+      s.background ?? {},
+      s.durations ?? {}
     )
   }
 
@@ -4088,6 +4136,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
             summaries: s.summaries,
             delivered: s.delivered,
             background: s.background,
+            durations: s.durations,
             plans: s.plans,
             autotasks: s.autotasks,
             todos: s.todos,

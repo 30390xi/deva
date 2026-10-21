@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Square,
   Sparkles,
@@ -7,7 +7,7 @@ import {
   FileText,
   FolderTree,
   FilePen,
-  Replace,
+  FilePlus,
   Search,
   FileSearch,
   Globe,
@@ -21,6 +21,7 @@ import {
   Info,
   MessageCircleQuestion,
   Bot,
+  Lightbulb,
   Pencil,
   Circle,
   CheckSquare,
@@ -30,7 +31,8 @@ import {
   FolderOpen,
   ListChecks,
   Package,
-  Archive
+  Archive,
+  type LucideIcon
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ChatBlock, ChatMessage, StreamStatus, ToolStatus } from '../../store/chat'
@@ -41,87 +43,69 @@ import { DeliverablesCard } from './DeliverablesCard'
 import { TodoItemList } from './Todos'
 
 /**
- * 助手消息的块渲染（对话优先外壳复用）：文本 / 思考 / 工具卡 / 子智能体 / 挂载请求 / 计划审阅 /
- * 问答卡 / 角色名片 / 定时任务名片，以及对话流底部的工作状态指示器。
+ * 助手消息的块渲染（对话优先外壳复用）：文本 / 思考、工具调用与子智能体（时间轴，每步一个节点）/
+ * 挂载请求 / 计划审阅 / 问答卡 / 角色名片 / 定时任务名片，以及对话流底部的工作状态指示器。
  */
 
-const TOOL_META: Record<string, { icon: React.ReactNode; key: string }> = {
-  read_file: { icon: <FileText size={14} />, key: 'chat.tool.readFile' },
-  list_dir: { icon: <FolderTree size={14} />, key: 'chat.tool.listDir' },
-  glob: { icon: <FileSearch size={14} />, key: 'chat.tool.glob' },
-  grep: { icon: <Search size={14} />, key: 'chat.tool.grep' },
-  web_fetch: { icon: <Globe size={14} />, key: 'chat.tool.webFetch' },
-  write_file: { icon: <FilePen size={14} />, key: 'chat.tool.writeFile' },
-  edit_file: { icon: <Replace size={14} />, key: 'chat.tool.editFile' },
-  run_command: { icon: <SquareTerminal size={14} />, key: 'chat.tool.runCommand' },
-  ask_user: { icon: <MessageCircleQuestion size={14} />, key: 'chat.tool.askUser' },
-  create_skill: { icon: <Sparkles size={14} />, key: 'chat.tool.createSkill' },
-  create_mcp: { icon: <Plug size={14} />, key: 'chat.tool.createMcp' },
-  memory_read: { icon: <Brain size={14} />, key: 'chat.tool.memoryRead' },
-  memory_write: { icon: <Brain size={14} />, key: 'chat.tool.memoryWrite' },
-  memory_delete: { icon: <Brain size={14} />, key: 'chat.tool.memoryDelete' },
-  // 正常的 todo_write 不画工具卡（进度在胶囊里）；只有参数被输出上限截断的那次会以普通工具卡出现。
-  todo_write: { icon: <ListChecks size={14} />, key: 'chat.tool.todoWrite' },
-  // 成功的 present_files 画交付卡；执行中 / 失败（路径不对）时以普通工具卡出现。
-  present_files: { icon: <Package size={14} />, key: 'chat.tool.presentFiles' }
+/**
+ * 内置工具 → 文案键与时间轴节点图标：工具名称取 chat.tool.<键>，动词取 chat.flow.{done|doing|base}.<键>。
+ * 不在表里的（如 MCP 工具）一律按 unknown 处理，图标为扳手。
+ */
+const TOOL_META: Record<string, { key: string; icon: LucideIcon }> = {
+  read_file: { key: 'readFile', icon: FileText },
+  list_dir: { key: 'listDir', icon: FolderTree },
+  glob: { key: 'glob', icon: FileSearch },
+  grep: { key: 'grep', icon: Search },
+  web_fetch: { key: 'webFetch', icon: Globe },
+  write_file: { key: 'writeFile', icon: FilePlus },
+  edit_file: { key: 'editFile', icon: FilePen },
+  run_command: { key: 'runCommand', icon: SquareTerminal },
+  ask_user: { key: 'askUser', icon: MessageCircleQuestion },
+  create_skill: { key: 'createSkill', icon: Sparkles },
+  create_mcp: { key: 'createMcp', icon: Plug },
+  memory_read: { key: 'memoryRead', icon: Brain },
+  memory_write: { key: 'memoryWrite', icon: Brain },
+  memory_delete: { key: 'memoryDelete', icon: Brain },
+  // 正常的 todo_write 不画工具节点（进度在胶囊里）；只有参数被输出上限截断的那次会以普通工具节点出现。
+  todo_write: { key: 'todoWrite', icon: ListChecks },
+  // 成功的 present_files 画交付卡；执行中 / 失败（路径不对）时以普通工具节点出现。
+  present_files: { key: 'presentFiles', icon: Package }
 }
 
 /**
- * 路径展示的字符预算。780px 列宽下标题约可容 70 字符，但结果徽标宽度不定
- * （「第 590–669/670 行」比「176 行」宽得多，实测同一条 68 字符路径会因此一行放得下、也可能折行），
- * 故取 54 留一档余量：窄徽标下本就放得下的路径不动，宽徽标下会折行的一律先压。
- * 窗口远窄于列宽上限时仍可能放不下，届时由 .card__title 的单行省略号兜底。
+ * 路径的展示形：只留「父目录/文件名」——文件名是身份，父目录用于区分同名文件（一堆 index.ts）。
+ * 工具行单行展示，深路径的前段对扫读没有帮助，完整路径挂在悬停上。
  */
-const PATH_BUDGET = 54
-
-/**
- * 深路径压缩中段：保头保尾，中间塞省略号，令其单行放得下而不折行。
- * 尾部固定留「父目录/文件名」——文件名是身份、父目录用于区分同名文件（一堆 index.ts）；
- * 头部在预算内尽量多留——src/main 与 src/test 的差别全在这一段。
- */
-function compressPath(p: string): string {
-  if (p.length <= PATH_BUDGET) return p
-  const sep = p.includes('\\') && !p.includes('/') ? '\\' : '/'
-  const segs = p.split(/[/\\]/)
-  // 少于 4 段则中间无段可省，省了反而更长
-  if (segs.length < 4) return p
-  const tail = segs.slice(-2).join(sep)
-  // 从左往右尽量多保留头部段，直到再加一段就超预算（+3 为 sep…sep 的开销）
-  let keep = 0
-  for (let i = 1; i <= segs.length - 2; i++) {
-    if (segs.slice(0, i).join(sep).length + 3 + tail.length > PATH_BUDGET) break
-    keep = i
-  }
-  // keep=1 且首段为空 → POSIX 绝对路径，join 得空串，恰好拼出前导分隔符
-  const out = `${segs.slice(0, keep).join(sep)}${keep > 0 ? sep : ''}…${sep}${tail}`
-  return out.length < p.length ? out : p
+function shortPath(p: string): string {
+  const trimmed = p.trim().replace(/[/\\]+$/, '')
+  const sep = trimmed.includes('\\') && !trimmed.includes('/') ? '\\' : '/'
+  const segs = trimmed.split(/[/\\]/).filter(Boolean)
+  return segs.length > 2 ? segs.slice(-2).join(sep) : trimmed
 }
 
 /**
- * 工具卡上要展示的参数提示：优先 command（run_command），再 path，再 pattern（grep/glob），再 url（web_fetch）。
- * full 为原值（压缩过时挂 title 供悬停查看），text 为展示值——只有 path 压缩中段，
- * 命令、正则、URL 原样展示，超长时由 CSS 单行省略号截断尾部（悬停可看全文）。
+ * 工具行的「对象」：优先 command（run_command），再 pattern（grep/glob——搜的是什么比在哪搜更有信息量，
+ * 搜索范围挂悬停），再 path，再 url（web_fetch），再记忆正文 / id。full 为原值（挂悬停），text 为展示值——
+ * 只有 path 缩成「父目录/文件名」，命令、正则、URL 原样展示，超长时由 CSS 单行省略号截断尾部。
+ * 未知工具（如 MCP 工具）显示工具名：动词「已调用」本身说明不了调了什么。
  */
-function argHint(args: unknown): { text: string; full: string } | null {
+function flowObject(name: string, args: unknown): { text: string; full: string } | null {
+  if (!TOOL_META[name]) return { text: name, full: name }
   if (args && typeof args === 'object') {
     const o = args as { command?: unknown; path?: unknown; pattern?: unknown; url?: unknown }
     if (typeof o.command === 'string' && o.command.trim()) return { text: o.command, full: o.command }
-    if (typeof o.path === 'string' && o.path.trim())
-      return { text: compressPath(o.path), full: o.path }
-    if (typeof o.pattern === 'string' && o.pattern.trim())
-      return { text: o.pattern, full: o.pattern }
+    if (typeof o.pattern === 'string' && o.pattern.trim()) {
+      const scope = typeof o.path === 'string' && o.path.trim() ? `${o.pattern}  ·  ${o.path}` : o.pattern
+      return { text: o.pattern, full: scope }
+    }
+    if (typeof o.path === 'string' && o.path.trim()) return { text: shortPath(o.path), full: o.path }
     if (typeof o.url === 'string' && o.url.trim()) return { text: o.url, full: o.url }
-    // memory_write 的记忆正文：让用户在卡片上直接看到模型记了什么（写入对用户可见、可审计）。
+    // memory_write 的记忆正文：让用户在工具行上直接看到模型记了什么（写入对用户可见、可审计）。
     const m = args as { content?: unknown; id?: unknown }
     if (typeof m.content === 'string' && m.content.trim()) return { text: m.content, full: m.content }
     if (typeof m.id === 'string' && m.id.trim()) return { text: m.id, full: m.id }
   }
   return null
-}
-
-/** 悬停 title 恒给原值：标题单行、超出以省略号截断，被截掉的部分只能靠悬停查看。 */
-function hintTitle(h: { text: string; full: string } | null): string | undefined {
-  return h ? h.full : undefined
 }
 
 /** 底部指示器要表达的当前活动。（对话优先外壳复用 StatusIndicator/deriveActivity，故导出。） */
@@ -161,16 +145,20 @@ export function deriveActivity(messages: ChatMessage[]): Activity {
  * 对话流底部的工作状态指示器：随自动滚动停在最新消息下方，仅流式期间显示。
  * 三种形态：活跃（脉动点 + 活动文案 + 已用秒数）/ 等待授权 / 自动重连（含[停止]）。
  * "自动重连"是主进程 reconnecting 事件驱动的真实信号，非渲染层猜测。
+ * folded：本轮已有「工作过程」折叠条——当前步骤露在它下面、计时在它标题末尾，活跃形态不再显示；
+ * 等待、重连、压缩这些特殊状态照常显示。
  */
 export function StatusIndicator({
   activity,
   status,
+  folded = false,
   onStop
 }: {
   activity: Activity
   status: StreamStatus
+  folded?: boolean
   onStop: () => void
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const { t } = useI18n()
 
   // 连接中断、正在自动重连：真实信号，给出停止入口（用户可放弃重连）。
@@ -246,12 +234,14 @@ export function StatusIndicator({
 
   const label =
     activity.kind === 'tool'
-      ? `${t('chat.work.usingTool')} · ${t(TOOL_META[activity.toolName]?.key ?? 'chat.tool.unknown')}`
+      ? `${t('chat.work.usingTool')} · ${t(`chat.tool.${verbKey(activity.toolName)}`)}`
       : activity.kind === 'subagent'
         ? `${t('chat.work.subagent')} · ${subagentName(activity.agent, t) || t('chat.subagent.fallback')}`
         : activity.kind === 'responding'
           ? t('chat.work.responding')
           : t('chat.work.thinking')
+
+  if (folded) return null
 
   return (
     <div className="chat__status" role="status" aria-live="polite">
@@ -273,13 +263,42 @@ function formatElapsed(sec: number): string {
 }
 
 /**
- * 思考块（可折叠）。对齐 Codex/DeepSeek 的推理折叠：思考中默认展开，思考完成后自动收起
- * （用户仍可手动点开）。标签随状态在「思考中」/「已思考」间切换。正文按弱化配色渲染 Markdown（muted）。
+ * 思考的实时小窗：最多几行高（见 .tl__think-live），超出时始终停在最新内容、上沿渐隐。
+ * 高度封顶，思考再长也不会把页面越撑越高。
  */
-function ThinkingBlock({ text, done }: { text: string; done: boolean }): React.JSX.Element {
+function LiveThinkingWindow({ text }: { text: string }): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    setOverflow(el.scrollHeight > el.clientHeight + 1)
+  }, [text])
+  return (
+    <div ref={ref} className={`tl__body tl__think tl__think-live${overflow ? ' is-overflow' : ''}`}>
+      <Markdown text={text} muted />
+    </div>
+  )
+}
+
+/**
+ * 时间轴上的思考节点（可展开）。对齐 Codex/DeepSeek 的推理折叠：思考中默认展开、标签扫光，
+ * 思考完成后自动收起（用户仍可手动点开）。正文按弱化配色渲染 Markdown（muted）。
+ * autoOpen=false（进行中折叠条下的当前步骤）：思考中不展开全文，改为实时滚动的小窗，高度封顶。
+ */
+function TimelineThinking({
+  text,
+  done,
+  autoOpen = true
+}: {
+  text: string
+  done: boolean
+  autoOpen?: boolean
+}): React.JSX.Element {
   const { t } = useI18n()
   // 初始：思考中展开、已完成（如历史消息）收起。
-  const [open, setOpen] = useState(!done)
+  const [open, setOpen] = useState(!done && autoOpen)
   // 完成的瞬间（done: false→true）自动收起一次；此后用户可自由再展开。
   const wasDone = useRef(done)
   useEffect(() => {
@@ -287,17 +306,35 @@ function ThinkingBlock({ text, done }: { text: string; done: boolean }): React.J
     wasDone.current = done
   }, [done])
   return (
-    <div className={open ? 'msg__think is-open' : 'msg__think'}>
-      <button type="button" className="msg__think-head" onClick={() => setOpen((v) => !v)}>
-        <ChevronRight size={13} className="msg__think-caret" />
-        <span className="msg__think-label">{done ? t('chat.thought') : t('chat.thinking')}</span>
-      </button>
-      {open && (
-        <div className="msg__think-body">
-          <Markdown text={text} muted />
-        </div>
-      )}
-    </div>
+    <li className={`tl__item${done ? '' : ' is-run'}${open ? ' is-open' : ''}`}>
+      <span className="tl__node">
+        <Lightbulb size={14} />
+      </span>
+      <div className="tl__main">
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="tl__text">
+            {done ? (
+              <span className="tl__verb">{t('chat.thought')}</span>
+            ) : (
+              <span className="tl__shimmer">{t('chat.thinking')}</span>
+            )}
+          </span>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
+        {open ? (
+          <div className="tl__body tl__think">
+            <Markdown text={text} muted />
+          </div>
+        ) : (
+          !done && !autoOpen && text.trim() && <LiveThinkingWindow text={text} />
+        )}
+      </div>
+    </li>
   )
 }
 
@@ -367,29 +404,18 @@ export function BlockView({
     )
   }
 
-  if (block.kind === 'thinking') {
-    return <ThinkingBlock text={block.text} done={thinkingDone} />
-  }
+  if (block.kind === 'tool' && block.name === 'present_files' && block.status === 'ok')
+    return <DeliverablesCard block={block} />
 
-  if (block.kind === 'tool') {
-    if (block.name === 'present_files' && block.status === 'ok') return <DeliverablesCard block={block} />
-    const meta = TOOL_META[block.name] ?? { icon: <Wrench size={14} />, key: 'chat.tool.unknown' }
-    const hint = argHint(block.args)
+  // 思考 / 工具调用 / 子智能体通常由 groupBlocks 归进时间轴；单独交到这里时画成只有一个节点的时间轴。
+  if (block.kind === 'thinking' || block.kind === 'tool' || block.kind === 'subagent') {
     return (
-      <div className="card">
-        <div className="card__head" title={hintTitle(hint)}>
-          <span className="card__head-icon">{meta.icon}</span>
-          <span className="card__title">
-            {t(meta.key)} {hint && <code>{hint.text}</code>}
-          </span>
-          <ToolBadge status={block.status} summary={block.summary} />
-        </div>
-      </div>
+      <Timeline
+        steps={[{ block, index: 0 }]}
+        liveBlock={thinkingDone ? undefined : block}
+        onStopSubagent={onStopSubagent}
+      />
     )
-  }
-
-  if (block.kind === 'subagent') {
-    return <SubagentCard block={block} onStop={onStopSubagent} />
   }
 
   if (block.kind === 'agentcard') {
@@ -421,7 +447,7 @@ export function BlockView({
 
   if (block.kind === 'compaction') return <CompactionNotice summary={block.summary} />
 
-  // notice：回合终止说明（截断/空回合等），弱化提示样式，区别于红色错误
+  // notice：回合终止说明（中止 / 截断 / 空回合等），一行灰字配黄色图标，区别于红色错误
   if (block.kind === 'notice') {
     const NOTICE_KEY: Record<typeof block.code, string> = {
       truncated: 'chat.notice.truncated',
@@ -438,11 +464,14 @@ export function BlockView({
     )
   }
 
-  // error
+  // error：红色只给图标和「出错了」标题；报错原文常是服务商返回的多行英文，用灰色正文显示
   return (
     <div className="msg__error">
       <AlertTriangle size={14} />
-      <span style={{ whiteSpace: 'pre-wrap' }}>{block.message}</span>
+      <div className="msg__error-body">
+        <span className="msg__error-title">{t('chat.error')}</span>
+        {block.message && <span className="msg__error-detail">{block.message}</span>}
+      </div>
     </div>
   )
 }
@@ -1026,67 +1055,187 @@ function AskCard({
   )
 }
 
-/** 折叠卡内的一行工具调用（子智能体内部步骤 / 连续工具组共用）：图标 + 名称与参数（单行省略）+ 状态徽标。 */
-function ToolStepRow({
-  step
-}: {
-  step: { name: string; args: unknown; status: ToolStatus; summary?: string }
-}): React.JSX.Element {
+/**
+ * 成功时不必再写出的结果摘要：动词已经说明了结果（主进程给的摘要是中文定稿，这里按原文比对）。
+ * 命令以退出码 0 结束是常态，同样不写；非 0 退出码主进程会标成失败，照常显示。
+ */
+const QUIET_SUMMARIES = new Set(['已编辑', '已写入', '退出码 0'])
+
+/** 工具的动词键（chat.flow.{done|doing|base}.<键>），与 TOOL_META 同名；未知工具（如 MCP 工具）为 unknown。 */
+function verbKey(name: string): string {
+  return TOOL_META[name]?.key ?? 'unknown'
+}
+
+type ToolStep = { name: string; args: unknown; status: ToolStatus; summary?: string }
+
+const isFailed = (status: ToolStatus): boolean => status === 'error' || status === 'denied'
+
+/** 节点图标：执行中转圈、失败打叉，其余按工具类型（未知工具为扳手）。 */
+function stepIcon(step: ToolStep, size: number): React.JSX.Element {
+  if (step.status === 'running') return <Loader2 size={size} className="spin" />
+  if (isFailed(step.status)) return <XCircle size={size} />
+  const Icon = TOOL_META[step.name]?.icon ?? Wrench
+  return <Icon size={size} />
+}
+
+/**
+ * 一次工具调用的文字：动词 + 对象 + 结果说明（单行省略，完整对象挂在外层的悬停上）。
+ * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝用红字写明原因。
+ */
+function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
   const { t } = useI18n()
-  const meta = TOOL_META[step.name] ?? { icon: <Wrench size={13} />, key: 'chat.tool.unknown' }
-  const hint = argHint(step.args)
+  const key = verbKey(step.name)
+  const obj = flowObject(step.name, step.args)
+  let verb: React.JSX.Element
+  let tail: React.JSX.Element | null = null
+  if (step.status === 'running') {
+    verb = <span className="tl__shimmer">{t(`chat.flow.doing.${key}`)}</span>
+  } else if (isFailed(step.status)) {
+    verb = <span className="tl__verb">{t(`chat.flow.base.${key}`)}</span>
+    const reason =
+      step.status === 'denied'
+        ? t('chat.status.denied')
+        : step.summary
+          ? t('chat.flow.failedWith').replace('{reason}', step.summary)
+          : t('chat.flow.failed')
+    tail = <span className="tl__err">{reason}</span>
+  } else {
+    verb = <span className="tl__verb">{t(`chat.flow.done.${key}`)}</span>
+    if (step.summary && !QUIET_SUMMARIES.has(step.summary))
+      tail = <span className="tl__extra">{step.summary}</span>
+  }
   return (
-    <div className="subagent__step" title={hintTitle(hint)}>
-      <span className="subagent__step-icon">{meta.icon}</span>
-      <span className="subagent__step-title">
-        {t(meta.key)} {hint && <code>{hint.text}</code>}
-      </span>
-      <ToolBadge status={step.status} summary={step.summary} />
-    </div>
+    <span className="tl__text">
+      {verb}
+      {obj && <code className="tl__obj">{obj.text}</code>}
+      {tail}
+    </span>
   )
 }
 
-type ToolBlock = Extract<ChatBlock, { kind: 'tool' }>
+/** 时间轴上的工具调用节点：图标节点 + 一行文字。 */
+function TimelineTool({ step }: { step: ToolStep }): React.JSX.Element {
+  const state = step.status === 'running' ? ' is-run' : isFailed(step.status) ? ' is-err' : ''
+  return (
+    <li className={`tl__item${state}`}>
+      <span className="tl__node">{stepIcon(step, 14)}</span>
+      <div className="tl__main">
+        <div className="tl__line" title={flowObject(step.name, step.args)?.full}>
+          <ToolText step={step} />
+        </div>
+      </div>
+    </li>
+  )
+}
 
-/** 连续工具调用达到此数即折叠成一张工具组卡。 */
-export const TOOL_GROUP_MIN = 2
+/** 时间轴上的中间说明（夹在工具调用之间的正文）：小圆点节点 + 弱化的正文。 */
+function TimelineNote({ text }: { text: string }): React.JSX.Element {
+  return (
+    <li className="tl__item tl__item--note">
+      <span className="tl__node">
+        <span className="tl__dot" />
+      </span>
+      <div className="tl__main">
+        <Markdown text={text} muted />
+      </div>
+    </li>
+  )
+}
+
+/** 时间轴的一步（index 为其在原块序列中的下标）。 */
+type TimelineStep = { block: ChatBlock; index: number }
+
+/**
+ * 时间轴（仿 Claude / ChatGPT）：一条细竖线串起每一步，每步一个图标节点——读取、编辑、命令各有图标，
+ * 失败的节点变红、执行中的转圈；思考与子智能体的节点可展开。逐条列出，不做合并。
+ * liveBlock = 仍在流式输出的那一块（按引用比对，思考据此判断是否已完成），没有则缺省。
+ * compact = 进行中折叠条下的当前步骤：思考中不展开全文，改为实时小窗。
+ * limit = 最多画几个节点：超出时留出最后一格写「还有 N 个在执行」，控制当前步骤区域的最大高度。
+ */
+export function Timeline({
+  steps,
+  liveBlock,
+  compact = false,
+  limit,
+  onStopSubagent
+}: {
+  steps: TimelineStep[]
+  liveBlock?: ChatBlock
+  compact?: boolean
+  limit?: number
+  onStopSubagent?: (toolId: string) => void
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const capped = limit !== undefined && steps.length > limit
+  const shown = capped ? steps.slice(0, limit - 1) : steps
+  return (
+    <ol className="tl">
+      {shown.map(({ block: b, index }) => {
+        if (b.kind === 'tool') return <TimelineTool key={b.id} step={b} />
+        if (b.kind === 'subagent') return <TimelineSubagent key={b.id} block={b} onStop={onStopSubagent} />
+        if (b.kind === 'thinking')
+          return (
+            <TimelineThinking key={`i${index}`} text={b.text} done={b !== liveBlock} autoOpen={!compact} />
+          )
+        if (b.kind === 'text') return <TimelineNote key={`i${index}`} text={b.text} />
+        return null
+      })}
+      {capped && (
+        <li className="tl__item tl__item--more">
+          <span className="tl__node">
+            <span className="tl__dot" />
+          </span>
+          <div className="tl__main">
+            <div className="tl__line">
+              {t('chat.process.more').replace('{n}', String(steps.length - shown.length))}
+            </div>
+          </div>
+        </li>
+      )}
+    </ol>
+  )
+}
 
 /**
  * 块序列的渲染单元：single = 原样渲染的单块（index 为其在原序列中的下标，供 thinkingDone 判定）；
- * toolGroup = 连续 ≥ TOOL_GROUP_MIN 个普通工具调用，折叠成一张卡。
+ * timeline = 一段连续的过程（思考 / 工具调用 / 子智能体），画成一条时间轴。
  */
 export type BlockItem =
   | { type: 'single'; block: ChatBlock; index: number }
-  | { type: 'toolGroup'; tools: ToolBlock[]; key: string }
+  | { type: 'timeline'; steps: TimelineStep[]; key: string }
+
+/** 进时间轴的块：思考、工具调用（成功的交付除外，它是交付卡）、子智能体。 */
+function isTimelineStep(b: ChatBlock): boolean {
+  if (b.kind === 'tool') return !(b.name === 'present_files' && b.status === 'ok')
+  return b.kind === 'thinking' || b.kind === 'subagent'
+}
 
 /**
- * 把助手块序列切成渲染单元（纯函数）。只合并 kind==='tool'；其间的空文本块视作透明（流式间隙常见）、
- * 不断开也不渲染；非空正文 / 思考 / 其余任何卡片都会断开——那是模型给用户看的内容，不该被折进去。
- * 不足 TOOL_GROUP_MIN 的连续段原样拆回单块（连同被跳过的空文本块），保持与分组前逐块一致。
+ * 把助手块序列切成渲染单元（纯函数）：连续的过程块收成一条时间轴；空文本块与步骤边界不渲染，也不打断时间轴
+ * （流式间隙常见）；其余块原样逐个渲染并打断时间轴。
+ * notesInline：夹在过程块之间的正文也作为时间轴上的「说明」节点——用于已结束回合的工作过程（那里的正文
+ * 都是中间说明）；进行中的回合不知道哪段正文是最终回复，正文照常渲染、打断时间轴。
+ * 只含说明、没有一步过程的段不成时间轴，正文原样拆回单块。
  */
-export function groupBlocks(blocks: ChatBlock[]): BlockItem[] {
+export function groupBlocks(blocks: ChatBlock[], notesInline = false): BlockItem[] {
   const out: BlockItem[] = []
-  let run: { block: ChatBlock; index: number }[] = []
-  let tools: ToolBlock[] = []
+  let run: TimelineStep[] = []
 
   const flush = (): void => {
-    if (tools.length >= TOOL_GROUP_MIN) {
-      // 以首个工具 id 作 key：组在流式中增长时卡片不重挂载，用户展开态得以保留。
-      out.push({ type: 'toolGroup', tools, key: `tg:${tools[0].id}` })
+    if (run.some((s) => isTimelineStep(s.block))) {
+      // 以首步下标作 key：时间轴在流式中增长时不重挂载，节点的展开态得以保留。
+      out.push({ type: 'timeline', steps: run, key: `tl:${run[0].index}` })
     } else {
-      for (const r of run) out.push({ type: 'single', block: r.block, index: r.index })
+      for (const s of run) out.push({ type: 'single', block: s.block, index: s.index })
     }
     run = []
-    tools = []
   }
 
   blocks.forEach((b, i) => {
-    // 成功的交付文件自成一张交付卡，不折进工具组；执行中 / 失败的交付调用与普通工具一样可折叠。
-    if (b.kind === 'tool' && !(b.name === 'present_files' && b.status === 'ok')) {
+    if (isTimelineStep(b) || (notesInline && b.kind === 'text' && b.text.trim())) {
       run.push({ block: b, index: i })
-      tools.push(b)
-    } else if (((b.kind === 'text' && !b.text.trim()) || b.kind === 'step') && tools.length > 0) {
-      run.push({ block: b, index: i })
+    } else if ((b.kind === 'text' && !b.text.trim()) || b.kind === 'step') {
+      // 透明：不渲染、不打断。
     } else {
       flush()
       out.push({ type: 'single', block: b, index: i })
@@ -1094,57 +1243,6 @@ export function groupBlocks(blocks: ChatBlock[]): BlockItem[] {
   })
   flush()
   return out
-}
-
-/**
- * 连续工具调用折叠卡：默认收起。标题 = 总数 + 最后一个工具（收起时也能看出「此刻在做什么」）；
- * 徽标 = 仍有执行中 → 执行中；否则有失败/拒绝 → N 个失败；全部成功 → 完成。展开后逐行列出每个调用。
- */
-export function ToolGroupCard({ tools }: { tools: ToolBlock[] }): React.JSX.Element {
-  const { t } = useI18n()
-  const [open, setOpen] = useState(false)
-  const last = tools[tools.length - 1]
-  const meta = TOOL_META[last.name] ?? { icon: <Wrench size={14} />, key: 'chat.tool.unknown' }
-  const hint = argHint(last.args)
-  const running = tools.some((x) => x.status === 'running')
-  const failed = tools.filter((x) => x.status === 'error' || x.status === 'denied').length
-  const count = t('chat.toolGroup.title').replace('{n}', String(tools.length))
-
-  let badge: React.JSX.Element
-  if (running) badge = <ToolBadge status="running" />
-  else if (failed > 0)
-    badge = <ToolBadge status="error" summary={t('chat.toolGroup.failed').replace('{n}', String(failed))} />
-  else badge = <ToolBadge status="ok" />
-
-  return (
-    <div className={`subagent toolgroup${open ? ' is-open' : ''}`}>
-      <button
-        type="button"
-        className="subagent__head"
-        onClick={() => setOpen((v) => !v)}
-        title={hint?.full}
-        aria-expanded={open}
-      >
-        <ChevronRight size={13} className="subagent__caret" />
-        <span className="subagent__head-icon">{meta.icon}</span>
-        <span className="toolgroup__title">
-          <span className="toolgroup__count">{count}</span>
-          <span className="toolgroup__sep">·</span>
-          {t(meta.key)} {hint && <code>{hint.text}</code>}
-        </span>
-        {badge}
-      </button>
-      {open && (
-        <div className="subagent__body">
-          <div className="subagent__steps">
-            {tools.map((x) => (
-              <ToolStepRow key={x.id} step={x} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
 }
 
 /**
@@ -1177,12 +1275,22 @@ function isProcess(b: ChatBlock): boolean {
   return b.kind === 'thinking' || b.kind === 'tool' || b.kind === 'subagent' || b.kind === 'todolist'
 }
 
+/** 块序列里是否已有过程（思考 / 工具调用 / 子智能体 / 已完成清单）：有则消息里会出现「工作过程」折叠条。 */
+export function hasProcess(blocks: ChatBlock[]): boolean {
+  return blocks.some(isProcess)
+}
+
 /**
- * 已结束回合的过程折叠（纯函数）：最后一个过程块及其之前的非固定块（含夹在中间的正文）收进「工作过程」，
- * 其后的正文即最终回复；固定块无论位置都留在外面，保持原相对顺序。
- * 没有过程块，或折叠后外面什么都不剩（如中断在工具调用上）→ null，按原样逐块渲染。
+ * 回合的过程折叠（纯函数）：最后一个过程块及其之前的非固定块（含夹在中间的正文）收进「工作过程」，
+ * 其后的正文即最终回复；固定块无论位置都留在外面，保持原相对顺序。进行中与结束后同一套切法——
+ * 进行中时夹在工具调用之间的说明一旦后面又有了工具调用，就随之收进折叠条。
+ * 没有过程块 → null，按原样逐块渲染。已结束回合折叠后外面什么都不剩（如中断在工具调用上）也返回 null；
+ * 进行中（live）不看这一条：回复还没写出来是常态。
  */
-export function splitProcess(blocks: ChatBlock[]): { process: ChatBlock[]; visible: ChatBlock[] } | null {
+export function splitProcess(
+  blocks: ChatBlock[],
+  live = false
+): { process: ChatBlock[]; visible: ChatBlock[] } | null {
   let last = -1
   blocks.forEach((b, i) => {
     if (isProcess(b)) last = i
@@ -1194,45 +1302,90 @@ export function splitProcess(blocks: ChatBlock[]): { process: ChatBlock[]; visib
     if (i <= last && !isPinned(b)) process.push(b)
     else visible.push(b)
   })
+  if (live) return { process, visible }
   const hasVisible = visible.some((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim()))
   return hasVisible ? { process, visible } : null
 }
 
 /**
- * 「工作过程」折叠条：默认收起，标题为已执行步数与失败数（只有思考时显示「已思考」）；
- * 展开后按原顺序渲染过程块（children 由调用方给出，复用其块渲染）。
+ * 进行中折叠条下露出的「当前步骤」：所有还在执行的工具调用 / 子智能体（并行的一并列出）；都执行完、
+ * 模型在想下一步时，保留最近的一步（含思考中），免得这块在一行和零行之间来回闪。
+ */
+export function currentSteps(process: ChatBlock[]): ChatBlock[] {
+  const steps = process.filter(isTimelineStep)
+  const running = steps.filter((b) => (b.kind === 'tool' || b.kind === 'subagent') && b.status === 'running')
+  if (running.length > 0) return running
+  return steps.length > 0 ? [steps[steps.length - 1]] : []
+}
+
+/** 秒数 →「1 分 12 秒」/「1m 12s」：高位为 0 的单位省略，秒恒显示。 */
+function formatDuration(sec: number, t: (key: string) => string): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const unit = (key: string, n: number): string => t(`chat.process.${key}`).replace('{n}', String(n))
+  const parts = h ? [unit('h', h), unit('m', m), unit('s', s)] : m ? [unit('m', m), unit('s', s)] : [unit('s', s)]
+  return parts.join(' ')
+}
+
+/**
+ * 「工作过程」折叠条：进行中与结束后都默认收起，一行灰字。
+ * 进行中：标题「处理中 · 7 步 · 12 秒」（计时在末尾，底部状态行此时不再显示），收起时下方露出当前步骤
+ * （preview，由调用方给出）。
+ * 结束后：标题为本轮耗时与步数（「已处理 1 分 12 秒 · 7 步」，工具调用与子智能体各算一步）；没记录耗时的
+ * 旧对话回落为「已执行 7 步」，只有思考时为「已思考」。失败不进标题——过程中的失败多是参数不对、
+ * 随即重试，展开后节点已标红；真正的错误由外面的错误块呈现。
+ * 展开后按原顺序画出整条时间轴（children 由调用方给出，复用其块渲染）；展开态由调用方保管，跨过回合结束不变。
  */
 export function ProcessFold({
   blocks,
+  durationMs,
+  live = false,
+  elapsedSec,
+  preview,
   open,
   onToggle,
   children
 }: {
   blocks: ChatBlock[]
+  durationMs?: number
+  live?: boolean
+  /** 进行中已用秒数，显示在标题末尾。 */
+  elapsedSec?: number
+  preview?: React.ReactNode
   open: boolean
   onToggle: () => void
   children: React.ReactNode
 }): React.JSX.Element {
   const { t } = useI18n()
-  const calls = blocks.filter((b) => b.kind === 'tool' || b.kind === 'subagent') as (
-    | ToolBlock
-    | Extract<ChatBlock, { kind: 'subagent' }>
-  )[]
-  const failed = calls.filter((b) => b.status === 'error' || b.status === 'denied').length
-  // 标题按步数（工具调用与子智能体各算一步）计，不与展开后工具组卡的「调用了 N 个工具」重复；只有思考时显示「已思考」。
-  const title =
-    calls.length > 0 ? t('chat.process.steps').replace('{n}', String(calls.length)) : t('chat.thought')
+  const calls = blocks.filter((b) => b.kind === 'tool' || b.kind === 'subagent').length
+  const parts: string[] = []
+  if (live) parts.push(t('chat.process.live'))
+  else if (durationMs !== undefined)
+    parts.push(
+      t('chat.process.worked').replace('{d}', formatDuration(Math.max(1, Math.round(durationMs / 1000)), t))
+    )
+  if (calls > 0)
+    parts.push(
+      t(live || durationMs !== undefined ? 'chat.process.count' : 'chat.process.steps').replace('{n}', String(calls))
+    )
+  const title = parts.length > 0 ? parts.join(' · ') : t('chat.thought')
   return (
     <div className={`msg__process${open ? ' is-open' : ''}`}>
       <button type="button" className="msg__process-head" aria-expanded={open} onClick={onToggle}>
         <ChevronRight size={13} className="msg__process-caret" />
-        {/* 失败数与标题同样弱化：过程中的失败多是参数不对、随即重试，不必抢眼；真正的错误由外面的错误块呈现。 */}
         <span>
           {title}
-          {failed > 0 && ` · ${t('chat.toolGroup.failed').replace('{n}', String(failed))}`}
+          {live && elapsedSec !== undefined && (
+            <span className="msg__process-time"> · {formatDuration(elapsedSec, t)}</span>
+          )}
         </span>
       </button>
-      {open && <div className="msg__process-body">{children}</div>}
+      {open ? (
+        <div className="msg__process-body">{children}</div>
+      ) : (
+        preview && <div className="msg__process-preview">{preview}</div>
+      )}
     </div>
   )
 }
@@ -1244,10 +1397,11 @@ function subagentName(agent: string | undefined, t: (key: string) => string): st
 }
 
 /**
- * 子智能体折叠 Task 卡（仿 Claude Code）：默认收起、只显示结论徽标；展开后看任务描述与内部工具调用序列。
- * 子智能体的权限请求不在此卡内——照常作为顶层权限卡浮出确认（见 reduceBlocks）。
+ * 时间轴上的子智能体节点（可展开）：「子智能体任务 + 标题」+ 后台标记 + 内部步数；执行中转圈、扫光，
+ * 失败节点变红并写明原因。展开后看任务描述与内部工具调用（每步一行，带小图标）。
+ * 子智能体的权限请求不在此节点内——照常作为顶层权限卡浮出确认（见 reduceBlocks）。
  */
-function SubagentCard({
+function TimelineSubagent({
   block,
   onStop
 }: {
@@ -1256,70 +1410,86 @@ function SubagentCard({
 }): React.JSX.Element {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
-  // 已点停止、等主进程收尾事件定格卡片的那一小段：按钮置灰，免得连点。
+  // 已点停止、等主进程收尾事件定格的那一小段：按钮置灰，免得连点。
   const [stopping, setStopping] = useState(false)
   // 标题优先用模型给的任务描述（3-5 字）：比固定的子智能体名有信息量，也与 Claude Code 一致；
   // 没给描述时退回子智能体名（未指定预设则为「通用子智能体」）。
   const name = block.desc || subagentName(block.agent, t) || t('chat.subagent.fallback')
+  const label = t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')
   const count = block.children.length
+  const running = block.status === 'running'
+  const failed = isFailed(block.status)
   // 后台运行中的子智能体不随主轮的停止键停下，只能在这里单独停。
-  const stoppable = block.background && block.status === 'running' && onStop
+  const stoppable = block.background && running && onStop
   return (
-    <div className={`subagent${open ? ' is-open' : ''}`}>
-      <div className="subagent__headrow">
-        <button type="button" className="subagent__head" onClick={() => setOpen((v) => !v)}>
-          <ChevronRight size={13} className="subagent__caret" />
-          <span className="subagent__head-icon">
-            <Bot size={14} />
-          </span>
-          <span className="subagent__title">
-            {t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')} ·{' '}
-            <strong>{name}</strong>
-            {block.background && <span className="subagent__bg">{t('chat.subagent.background')}</span>}
-            {count > 0 && (
-              <span className="subagent__count">
-                {count} {t('chat.subagent.stepUnit')}
-              </span>
-            )}
-          </span>
-          <ToolBadge status={block.status} summary={block.summary} />
-        </button>
-        {stoppable && (
+    <li className={`tl__item${running ? ' is-run' : failed ? ' is-err' : ''}${open ? ' is-open' : ''}`}>
+      <span className="tl__node">
+        {running ? <Loader2 size={14} className="spin" /> : failed ? <XCircle size={14} /> : <Bot size={14} />}
+      </span>
+      <div className="tl__main">
+        <div className="tl__head">
           <button
             type="button"
-            className="subagent__stop"
-            title={t('chat.subagent.stopHint')}
-            disabled={stopping}
-            onClick={() => {
-              setStopping(true)
-              onStop(block.id)
-            }}
+            className="tl__line"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
           >
-            <Square size={10} />
-            {t('chat.subagent.stop')}
+            <span className="tl__text">
+              <span className={running ? 'tl__shimmer' : 'tl__verb'}>{label}</span>
+              <span>{name}</span>
+              {block.background && <span className="tl__tag">{t('chat.subagent.background')}</span>}
+              {count > 0 && (
+                <span className="tl__extra">
+                  {count} {t('chat.subagent.stepUnit')}
+                </span>
+              )}
+              {failed && (
+                <span className="tl__err">
+                  {block.status === 'denied'
+                    ? t('chat.status.denied')
+                    : block.summary || t('chat.status.failed')}
+                </span>
+              )}
+            </span>
+            <ChevronRight size={12} className="tl__caret" />
           </button>
-        )}
-      </div>
-      {open && (
-        <div className="subagent__body">
-          {block.task && (
-            <div className="subagent__task">
-              <span className="subagent__task-label">{t('chat.subagent.task')}</span>
-              <span className="subagent__task-text">{block.task}</span>
-            </div>
-          )}
-          {count === 0 ? (
-            <div className="subagent__empty">{t('chat.subagent.noSteps')}</div>
-          ) : (
-            <div className="subagent__steps">
-              {block.children.map((c) => (
-                <ToolStepRow key={c.id} step={c} />
-              ))}
-            </div>
+          {stoppable && (
+            <button
+              type="button"
+              className="tl__stop"
+              title={t('chat.subagent.stopHint')}
+              disabled={stopping}
+              onClick={() => {
+                setStopping(true)
+                onStop(block.id)
+              }}
+            >
+              <Square size={9} />
+              {t('chat.subagent.stop')}
+            </button>
           )}
         </div>
-      )}
-    </div>
+        {open && (
+          <div className="tl__body">
+            {block.task && <div className="tl__task">{block.task}</div>}
+            {count === 0 ? (
+              <div className="tl__empty">{t('chat.subagent.noSteps')}</div>
+            ) : (
+              block.children.map((c) => (
+                <div
+                  key={c.id}
+                  className={`tl__sub${isFailed(c.status) ? ' is-err' : c.status === 'running' ? ' is-run' : ''}`}
+                  title={flowObject(c.name, c.args)?.full}
+                >
+                  <span className="tl__sub-icon">{stepIcon(c, 12)}</span>
+                  <ToolText step={c} />
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </li>
   )
 }
 

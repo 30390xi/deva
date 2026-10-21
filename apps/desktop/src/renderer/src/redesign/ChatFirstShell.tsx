@@ -128,9 +128,11 @@ import {
   CompactionNotice,
   ProcessFold,
   StatusIndicator,
-  ToolGroupCard,
+  Timeline,
+  currentSteps,
   deriveActivity,
   groupBlocks,
+  hasProcess,
   splitProcess
 } from '../features/chat/blocks'
 import { ModelSettings } from '../features/settings/ModelSettings'
@@ -3235,6 +3237,8 @@ function Conversation({
       msg={m}
       owner={owner}
       active={!selecting && streaming && i === messages.length - 1}
+      latest={i === messages.length - 1}
+      elapsedSec={i === messages.length - 1 ? streamStatus.elapsedSec : 0}
       dataTurn={turn}
       onAsk={onAsk}
       onPlan={onPlan}
@@ -3310,6 +3314,10 @@ function Conversation({
                   <StatusIndicator
                     activity={deriveActivity(messages)}
                     status={streamStatus}
+                    folded={
+                      messages[messages.length - 1]?.role === 'assistant' &&
+                      hasProcess(messages[messages.length - 1].blocks)
+                    }
                     onStop={onStop}
                   />
                 )}
@@ -3569,6 +3577,8 @@ function ConvMessage({
   msg,
   owner,
   active,
+  latest,
+  elapsedSec,
   dataTurn,
   onAsk,
   onPlan,
@@ -3580,6 +3590,10 @@ function ConvMessage({
   msg: ChatMessage
   owner?: Persona
   active: boolean
+  /** 是否为对话里最后一条消息（进行中撑住的高度在它不再是最后一条时释放）。 */
+  latest: boolean
+  /** 本轮已用秒数（进行中的折叠条标题末尾显示；只对 active 的消息有意义）。 */
+  elapsedSec: number
   /** 该消息所属的对话轮下标（0 基）；标注在根节点上，供右键菜单定位「删除此轮」。前言/未知为 undefined。 */
   dataTurn?: number
   onAsk: (key: string, answers: string[]) => void
@@ -3590,8 +3604,35 @@ function ConvMessage({
   onStopSubagent: (toolId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
-  // 已结束回合的「工作过程」是否展开：默认收起，只露最终回复与固定卡片；用户点开后在本次挂载内保持。
+  // 「工作过程」是否展开：进行中与结束后都默认收起；用户点开后在本次挂载内保持（跨过回合结束也不变）。
   const [processOpen, setProcessOpen] = useState(false)
+  // 进行中消息高度只增不减：当前步骤区域随内容伸缩（5 个并行工具 → 1 行思考 → 1 个工具）、中间说明收进
+  // 折叠条，都会让消息变矮，页面跟着上下拉扯。故把本轮出现过的最大高度记作最小高度，空出的地方留在消息
+  // 底部。回合结束时也先不释放（最终回复很短时会一下缩掉一大截），等它不再是最后一条（下一轮开始）再释放。
+  // 用户在消息里点了按钮（开合折叠条、思考 / 子智能体节点、各种卡片）也释放：那是有意的伸缩，
+  // 否则点开思考再收起，撑高的那截会一直留着，「回到最新」就落到一片空白上。
+  const contentRef = useRef<HTMLDivElement>(null)
+  const peakRef = useRef(0)
+  const releasePeak = (): void => {
+    peakRef.current = 0
+    if (contentRef.current) contentRef.current.style.minHeight = ''
+  }
+  useLayoutEffect(() => {
+    const el = contentRef.current
+    if (!active || !el) return
+    const ro = new ResizeObserver(() => {
+      const h = el.getBoundingClientRect().height
+      if (h > peakRef.current) {
+        peakRef.current = h
+        el.style.minHeight = `${h}px`
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [active])
+  useLayoutEffect(() => {
+    if (!latest) releasePeak()
+  }, [latest])
   // 后台任务通知（后台子智能体结束后自动起的那一轮的起点）：一行居中的系统通知，不画成用户气泡。
   // 仍保留 is-user + data-turn：它是一轮的起点，右键删轮 / 跳转定位都靠它。
   if (msg.role === 'user' && msg.notify) {
@@ -3635,17 +3676,24 @@ function ConvMessage({
       </div>
     )
   }
-  // 连续 ≥2 个工具调用折叠成一张工具组卡（见 groupBlocks）；其余块逐个原样渲染。
-  // 进行中的回合（active）不折叠，thinkingDone 只在此时有意义；已结束回合的块一律已完成。
-  const renderBlocks = (blocks: ChatBlock[]): React.ReactNode =>
-    groupBlocks(blocks).map((item) =>
-      item.type === 'toolGroup' ? (
-        <ToolGroupCard key={item.key} tools={item.tools} />
+  // 仍在流式输出的那一块（只有进行中的回合才有）：思考据此判断是否已完成，按引用比对。
+  const liveBlock = active ? msg.blocks[msg.blocks.length - 1] : undefined
+  // 连续的思考 / 工具调用 / 子智能体画成一条时间轴（见 groupBlocks）；其余块逐个原样渲染。
+  // notesInline：工作过程里夹着的正文是中间说明，作为时间轴上的说明节点，不打断时间轴。
+  const renderBlocks = (blocks: ChatBlock[], notesInline = false): React.ReactNode =>
+    groupBlocks(blocks, notesInline).map((item) =>
+      item.type === 'timeline' ? (
+        <Timeline
+          key={item.key}
+          steps={item.steps}
+          liveBlock={liveBlock}
+          onStopSubagent={onStopSubagent}
+        />
       ) : (
         <BlockView
           key={item.index}
           block={item.block}
-          thinkingDone={!(active && item.index === blocks.length - 1)}
+          thinkingDone={item.block !== liveBlock}
           onAsk={onAsk}
           onPlan={onPlan}
           onMountReq={onMountReq}
@@ -3655,8 +3703,19 @@ function ConvMessage({
         />
       )
     )
-  // 回合结束后把思考 / 工具调用等过程收进「工作过程」折叠条，名片、交付卡等固定块与最终回复留在外面（见 splitProcess）。
-  const split = active ? null : splitProcess(msg.blocks)
+  // 思考 / 工具调用等过程收进「工作过程」折叠条，名片、交付卡等固定块与回复正文留在外面（见 splitProcess）。
+  // 进行中同样默认收起，收起时折叠条下露出当前步骤（并行执行的一并列出，最多 5 行，见 currentSteps）。
+  const split = splitProcess(msg.blocks, active)
+  const preview =
+    split && active ? (
+      <Timeline
+        steps={currentSteps(split.process).map((b) => ({ block: b, index: msg.blocks.indexOf(b) }))}
+        liveBlock={liveBlock}
+        compact
+        limit={5}
+        onStopSubagent={onStopSubagent}
+      />
+    ) : undefined
   return (
     <div className="cf-msg" data-turn={dataTurn}>
       <Avatar persona={owner} size={32} />
@@ -3664,15 +3723,25 @@ function ConvMessage({
         <div className="cf-msg__head">
           <span className="cf-msg__name">{owner?.name ?? t('cf.assistant')}</span>
         </div>
-        <div className="msg__content">
+        <div
+          className="msg__content"
+          ref={contentRef}
+          onClickCapture={(e) => {
+            if ((e.target as HTMLElement).closest('button')) releasePeak()
+          }}
+        >
           {split ? (
             <>
               <ProcessFold
                 blocks={split.process}
+                durationMs={msg.durationMs}
+                live={active}
+                elapsedSec={active ? elapsedSec : undefined}
+                preview={preview}
                 open={processOpen}
                 onToggle={() => setProcessOpen((v) => !v)}
               >
-                {renderBlocks(split.process)}
+                {renderBlocks(split.process, true)}
               </ProcessFold>
               {renderBlocks(split.visible)}
             </>

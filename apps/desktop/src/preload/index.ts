@@ -191,7 +191,8 @@ export type DisplayMessage =
       /** 后台任务通知：展示为一行系统通知而非用户气泡，text 为其标题。 */
       notify?: true
     }
-  | { role: 'assistant'; blocks: DisplayBlock[] }
+  /** durationMs：本轮耗时（未记录则缺省）。 */
+  | { role: 'assistant'; blocks: DisplayBlock[]; durationMs?: number }
 
 /** 回滚列表里每轮自身的改动量（与 services/checkpoints.ts 的 RewindTurnStat 对齐）。 */
 export interface RewindTurnStat {
@@ -735,7 +736,8 @@ export type ChatStreamEvent =
       /** notify：本轮由后台任务通知自动发起，text 为通知标题。 */
       user: { text: string; attachments: { name: string; kind: 'image' | 'document' | 'text' }[]; notify?: true }
     }
-  | { type: 'done'; stopReason: string }
+  /** durationMs：本轮耗时（扣除等用户处置的时间）。 */
+  | { type: 'done'; stopReason: string; durationMs?: number }
 
 /** IM 机器人（远程通道）状态，与 services/remote/index.ts 的 BotView / ScanEvent 对齐。 */
 export type BotPlatform = 'feishu' | 'telegram'

@@ -295,7 +295,6 @@ const zhCN: MessageTree = {
       // 空 agent 名 = 未指定内置子智能体，即回落通用子智能体（见主进程 subagents.ts）。
       fallback: 'General',
       fork: '分身',
-      task: '任务',
       stepUnit: '步',
       noSteps: '无内部工具调用',
       // run_in_background：派发它的那轮不等它，结束后自动通知主智能体。
@@ -305,12 +304,78 @@ const zhCN: MessageTree = {
       // 后台任务通知行的兜底文案（主进程通常会给出具体标题）。
       notify: '后台任务已结束'
     },
-    toolGroup: {
-      title: '调用了 {n} 个工具',
-      failed: '{n} 个失败'
+    // 时间轴上每步一行：「动词 + 对象」。done=已完成，doing=执行中（扫光），base=失败时接「失败：原因」。
+    flow: {
+      done: {
+        readFile: '已读取',
+        listDir: '已列出',
+        glob: '已查找',
+        grep: '已搜索',
+        webFetch: '已获取',
+        writeFile: '已写入',
+        editFile: '已编辑',
+        runCommand: '已运行',
+        askUser: '已询问',
+        createSkill: '已创建技能',
+        createMcp: '已创建 MCP 服务',
+        memoryRead: '已读取记忆',
+        memoryWrite: '已记住',
+        memoryDelete: '已删除记忆',
+        todoWrite: '已更新待办清单',
+        presentFiles: '已交付',
+        unknown: '已调用'
+      },
+      doing: {
+        readFile: '正在读取',
+        listDir: '正在列出',
+        glob: '正在查找',
+        grep: '正在搜索',
+        webFetch: '正在获取',
+        writeFile: '正在写入',
+        editFile: '正在编辑',
+        runCommand: '正在运行',
+        askUser: '正在询问',
+        createSkill: '正在创建技能',
+        createMcp: '正在创建 MCP 服务',
+        memoryRead: '正在读取记忆',
+        memoryWrite: '正在记住',
+        memoryDelete: '正在删除记忆',
+        todoWrite: '正在更新待办清单',
+        presentFiles: '正在交付',
+        unknown: '正在调用'
+      },
+      base: {
+        readFile: '读取',
+        listDir: '列出',
+        glob: '查找',
+        grep: '搜索',
+        webFetch: '获取',
+        writeFile: '写入',
+        editFile: '编辑',
+        runCommand: '运行',
+        askUser: '询问',
+        createSkill: '创建技能',
+        createMcp: '创建 MCP 服务',
+        memoryRead: '读取记忆',
+        memoryWrite: '记住',
+        memoryDelete: '删除记忆',
+        todoWrite: '更新待办清单',
+        presentFiles: '交付',
+        unknown: '调用'
+      },
+      failed: '失败',
+      failedWith: '失败：{reason}'
     },
     process: {
-      steps: '已执行 {n} 步'
+      // 折叠条标题：进行中「处理中 · 7 步」，结束后「已处理 1 分 12 秒 · 7 步」；没记录耗时的旧对话回落为「已执行 7 步」。
+      live: '处理中',
+      more: '还有 {n} 个在执行',
+      worked: '已处理 {d}',
+      count: '{n} 步',
+      steps: '已执行 {n} 步',
+      h: '{n} 小时',
+      m: '{n} 分',
+      s: '{n} 秒'
     },
     agentcard: {
       title: '角色名片',
@@ -1302,7 +1367,6 @@ const en: MessageTree = {
       continuedTitle: 'Subagent follow-up',
       fallback: 'General',
       fork: 'Fork',
-      task: 'Task',
       stepUnit: 'steps',
       noSteps: 'No internal tool calls',
       background: 'Background',
@@ -1310,12 +1374,76 @@ const en: MessageTree = {
       stopHint: 'Stop this background subagent (its output so far goes to the main agent with your next message)',
       notify: 'Background task finished'
     },
-    toolGroup: {
-      title: '{n} tool calls',
-      failed: '{n} failed'
+    flow: {
+      done: {
+        readFile: 'Read',
+        listDir: 'Listed',
+        glob: 'Found',
+        grep: 'Searched',
+        webFetch: 'Fetched',
+        writeFile: 'Wrote',
+        editFile: 'Edited',
+        runCommand: 'Ran',
+        askUser: 'Asked',
+        createSkill: 'Created skill',
+        createMcp: 'Created MCP server',
+        memoryRead: 'Read memory',
+        memoryWrite: 'Remembered',
+        memoryDelete: 'Forgot memory',
+        todoWrite: 'Updated todo list',
+        presentFiles: 'Delivered',
+        unknown: 'Called'
+      },
+      doing: {
+        readFile: 'Reading',
+        listDir: 'Listing',
+        glob: 'Finding',
+        grep: 'Searching',
+        webFetch: 'Fetching',
+        writeFile: 'Writing',
+        editFile: 'Editing',
+        runCommand: 'Running',
+        askUser: 'Asking',
+        createSkill: 'Creating skill',
+        createMcp: 'Creating MCP server',
+        memoryRead: 'Reading memory',
+        memoryWrite: 'Remembering',
+        memoryDelete: 'Forgetting memory',
+        todoWrite: 'Updating todo list',
+        presentFiles: 'Delivering',
+        unknown: 'Calling'
+      },
+      base: {
+        readFile: 'Read',
+        listDir: 'List',
+        glob: 'Find',
+        grep: 'Search',
+        webFetch: 'Fetch',
+        writeFile: 'Write',
+        editFile: 'Edit',
+        runCommand: 'Run',
+        askUser: 'Ask',
+        createSkill: 'Create skill',
+        createMcp: 'Create MCP server',
+        memoryRead: 'Read memory',
+        memoryWrite: 'Remember',
+        memoryDelete: 'Forget memory',
+        todoWrite: 'Update todo list',
+        presentFiles: 'Deliver',
+        unknown: 'Call'
+      },
+      failed: 'failed',
+      failedWith: 'failed: {reason}'
     },
     process: {
-      steps: '{n} steps'
+      live: 'Working',
+      more: '{n} more running',
+      worked: 'Worked for {d}',
+      count: '{n} steps',
+      steps: '{n} steps',
+      h: '{n}h',
+      m: '{n}m',
+      s: '{n}s'
     },
     agentcard: {
       title: 'Agent card',
