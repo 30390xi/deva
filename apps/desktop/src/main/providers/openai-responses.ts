@@ -285,7 +285,7 @@ export async function* streamResponses(
     return
   }
 
-  // 残缺的调用：截断时连 output_item.done 都没等到的也算上；非截断（坏 JSON）维持旧行为按 {} 交出。
+  // 残缺的调用：截断时连 output_item.done 都没等到的也算上；非截断的坏 JSON 同样如实上报（见 settleBrokenCalls）。
   if (stopReason === 'max_tokens')
     for (const c of calls.values()) broken.push({ id: c.callId, name: c.name, raw: c.args })
   else if (broken.length) sawTool = true

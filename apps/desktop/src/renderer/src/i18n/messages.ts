@@ -228,7 +228,7 @@ const zhCN: MessageTree = {
     emptyHint: '描述任务，Deva 会读写项目文件、按需请求授权来完成。',
     error: '出错了',
     notice: {
-      truncated: '回复多次撞上输出长度上限，自动续写仍未完成，已停下。可发送「继续」，或让我把内容拆小、分段写入文件。',
+      truncated: '回复多次撞上输出长度上限或工具参数不完整，自动续写仍未完成，已停下。可发送「继续」，或让我把内容拆小、分段写入文件。',
       empty: '本轮模型没有返回任何内容。可换种说法重试或换个模型；若这轮对话已经很长，也可以新建对话或先压缩上下文。',
       refused: '模型拒绝了本次请求（或被服务商的内容策略拦截），本轮没有返回内容。换种说法或换个模型再试。',
       compacted: '较早的对话已压缩为摘要',
@@ -1323,7 +1323,7 @@ const en: MessageTree = {
     emptyHint: 'Describe a task; Deva reads and writes project files, asking permission as needed.',
     error: 'Something went wrong',
     notice: {
-      truncated: 'Replies kept hitting the output length limit and automatic continuation didn’t finish, so I stopped. Send “continue”, or ask me to split the work into smaller pieces.',
+      truncated: 'Replies kept hitting the output length limit or producing incomplete tool arguments, and automatic continuation didn’t finish, so I stopped. Send “continue”, or ask me to split the work into smaller pieces.',
       empty:
         'The model returned nothing this turn. Try rephrasing or another model; if this chat has grown long, start a new one or compact the context first.',
       refused:

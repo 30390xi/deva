@@ -148,6 +148,7 @@ function mapFinishReason(raw: string | null | undefined): StopReason {
     case 'function_call':
       return 'tool_use'
     case 'content_filter':
+    case 'sensitive': // 智谱：内容被安全审核拦截
       return 'refusal'
     case 'length':
       return 'max_tokens'
@@ -322,6 +323,15 @@ export async function* streamOpenAI(
       }
 
       if (choice.finish_reason) {
+        // 智谱：network_error = 模型推理异常，本步输出不完整——按可重试错误上报，引擎丢弃残缺尾部重发本步。
+        if (choice.finish_reason === 'network_error') {
+          yield {
+            type: 'error',
+            error: { kind: 'server', retryable: true, message: '服务端推理异常（finish_reason: network_error）' }
+          }
+          yield { type: 'done', stopReason: 'error' }
+          return
+        }
         stopReason = mapFinishReason(choice.finish_reason)
         if (stopReason === 'tool_use') yield* flushCalls()
       }
@@ -336,10 +346,10 @@ export async function* streamOpenAI(
     return
   }
 
-  // 残留未 flush 的工具调用：finish_reason=length（截在参数中途——照实上报截断，不改写成 tool_use），
-  // 或个别实现根本不带 finish_reason（兜底按工具调用收尾）。
+  // 残留未 flush 的工具调用：finish_reason=length / 内容拦截（截在参数中途——照实上报原因，不改写成
+  // tool_use），或个别实现不带 finish_reason、或带的是 stop（兜底按工具调用收尾）。
   if (calls.size) {
-    if (stopReason !== 'max_tokens') stopReason = 'tool_use'
+    if (stopReason === 'end_turn') stopReason = 'tool_use'
     yield* flushCalls()
   }
 

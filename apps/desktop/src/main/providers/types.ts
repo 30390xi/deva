@@ -84,7 +84,7 @@ export interface ToolSpec {
 /**
  * 归一化的终止原因。
  * 'refusal' = 模型拒绝作答、或被服务端内容策略拦截（OpenAI finish_reason 'content_filter' /
- * Anthropic stop_reason 'refusal'）。**必须与 end_turn 区分**：这类回合同样「自然结束且无正文」，
+ * 智谱 'sensitive' / Anthropic stop_reason 'refusal'）。**必须与 end_turn 区分**：这类回合同样「自然结束且无正文」，
  * 混作 end_turn 会让空回合被一律归咎于「上下文接近上限」，给出完全错误的排查方向。
  */
 export type StopReason =
@@ -156,10 +156,16 @@ export type StreamEvent =
   | { type: 'thinking_delta'; text: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
   /**
-   * 参数写到一半就撞上输出上限（stopReason=max_tokens）的工具调用：参数原文残缺、不可执行。
-   * 循环把它记成一次失败的工具调用，回灌「请分段写」（见 chat.ts runAgentLoop）。
+   * 参数没能完整解析的工具调用：参数原文残缺、不可执行，cause 说明原因（见 BrokenCallCause）。
+   * 循环把它记成一次失败的工具调用，按原因回灌纠正提示（见 chat.ts runAgentLoop）。
    */
-  | { type: 'tool_call_truncated'; id: string; name: string; partialArgs: string }
+  | {
+      type: 'tool_call_truncated'
+      id: string
+      name: string
+      partialArgs: string
+      cause: BrokenCallCause
+    }
   /**
    * 用量。input = 本次请求的**总提示 token**（已含缓存命中/写入部分）。
    * 注意 Anthropic 协议的 input_tokens 只是「未命中缓存的余量」，适配器已在此把三段相加归一，
@@ -185,7 +191,7 @@ export function toolImagesNote(images: ImagePart[]): string {
   return `[以下 ${images.length} 张图片是上方工具结果的附件${names ? `：${names}` : ''}]`
 }
 
-/** 解析工具参数 JSON：空串视为无参数 `{}`；解析失败返回 undefined（多半是被输出上限截在了中途）。 */
+/** 解析工具参数 JSON：空串视为无参数 `{}`；解析失败返回 undefined（多半是被截在了中途）。 */
 export function parseToolArgs(raw: string): unknown {
   if (!raw) return {}
   try {
@@ -196,19 +202,25 @@ export function parseToolArgs(raw: string): unknown {
 }
 
 /**
- * 参数没能完整解析的工具调用收尾（三个适配器共用）。因输出上限截断（stopReason=max_tokens）时
- * 如实上报为 tool_call_truncated——此前这类调用被当成参数为 `{}` 的完整调用交出去执行（报参数缺失），
- * 截断本身反被掩盖。其余情况（模型给了坏 JSON，极少见）维持旧行为按 `{}` 交出，让工具报错、模型自行纠正。
+ * 工具参数没能完整解析的原因。max_tokens = 写到一半撞上输出上限；refusal = 被服务端内容策略截断；
+ * invalid = 流正常结束参数却不是合法 JSON——多见于超长参数（个别中转截断了却不报 length，或模型在
+ * 长内容里写坏了转义）。
+ */
+export type BrokenCallCause = 'max_tokens' | 'refusal' | 'invalid'
+
+/**
+ * 参数没能完整解析的工具调用收尾（三个适配器共用）：一律如实上报为 tool_call_truncated，按 stopReason
+ * 定性。此前非截断的坏参数被当成参数为 `{}` 的完整调用交出去执行，工具只报「缺少 path 参数」——模型以为
+ * 漏填了参数，原样重发同一个超长调用，反复失败也不停（连续截断的闸门管不到它）。
  */
 export function* settleBrokenCalls(
   broken: { id: string; name: string; raw: string }[],
   stopReason: StopReason
 ): Generator<StreamEvent> {
-  for (const c of broken) {
-    if (stopReason === 'max_tokens')
-      yield { type: 'tool_call_truncated', id: c.id, name: c.name, partialArgs: c.raw }
-    else yield { type: 'tool_call', id: c.id, name: c.name, args: {} }
-  }
+  const cause: BrokenCallCause =
+    stopReason === 'max_tokens' ? 'max_tokens' : stopReason === 'refusal' ? 'refusal' : 'invalid'
+  for (const c of broken)
+    yield { type: 'tool_call_truncated', id: c.id, name: c.name, partialArgs: c.raw, cause }
 }
 
 /** 响应体摘要：折叠空白、限长。中转 / 网关常把真正原因（上游额度用尽、内容拦截等）写在这里。 */

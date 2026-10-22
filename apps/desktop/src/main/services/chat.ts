@@ -6,6 +6,7 @@ import { resolve as resolvePath } from 'node:path'
 import { streamChat } from '../providers'
 import {
   isEffortLevel,
+  type BrokenCallCause,
   type ContentPart,
   type EffortLevel,
   type Message,
@@ -1131,9 +1132,10 @@ const EMPTY_NUDGE =
   '如果任务已经完成，请简要告诉用户结果；如果确实需要用户决定，请用 ask_user 提问。'
 
 /**
- * 工具参数撞上输出上限被截断（适配器报 tool_call_truncated）：连续这么多步都截断就停下，交回
- * 「已截断」提示。前几次记成失败的工具调用、回灌「请分段写」，模型拆小后自然接着做；一直拆不小
- * （比如每次都在长篇思考上耗光预算）则不再空转。主轮步数不设上限，这道闸必须有。
+ * 工具参数没能完整解析（适配器报 tool_call_truncated：撞上输出上限、被内容策略截断、或参数不是合法
+ * JSON）：连续这么多步都如此就停下，交回「已截断」提示。前几次记成失败的工具调用、回灌纠正提示，
+ * 模型拆小后自然接着做；一直拆不小（比如每次都在长篇思考上耗光预算）则不再空转。主轮步数不设上限，
+ * 这道闸必须有。
  */
 const MAX_TRUNCATED_STREAK = 4
 /** 写进被截断调用 tool_use 里的标记：展示层据此一律画成普通工具卡（它不是能被答复的问答 / 计划 / 名片）。 */
@@ -1155,19 +1157,45 @@ function truncatedCallInput(partialArgs: string): Record<string, unknown> {
   return { ...(path ? { path } : {}), [TRUNCATED_FLAG]: true }
 }
 
+/** 参数残缺调用的工具卡摘要。 */
+const BROKEN_CALL_LABEL: Record<BrokenCallCause, string> = {
+  max_tokens: '输出超长，未执行',
+  refusal: '内容被拦截，未执行',
+  invalid: '参数无效，未执行'
+}
+
 /**
- * 被截断调用的回灌结果：讲清「没执行、没改动」，并给一个模型能照做的尺度——按它这次写到的字符数
- * 折半（连续第二次截断再折成三分之一），它数不准 token，但能估字符与行数。
+ * 参数残缺调用的回灌结果：讲清「没执行、没改动」及原因，并给一个模型能照做的尺度——按它这次写到的
+ * 字符数折半（连续第二次再折成三分之一），它数不准 token，但能估字符与行数。
  */
-function truncatedCallResult(name: string, partialChars: number, streak: number): string {
+function truncatedCallResult(
+  name: string,
+  partialChars: number,
+  cause: BrokenCallCause,
+  streak: number
+): string {
   const limit = Math.max(1000, Math.floor(partialChars / (streak + 1) / 100) * 100)
-  const again = streak > 1 ? `这已是连续第 ${streak} 次截断，请把每段切得更小。` : ''
+  const split =
+    name === 'write_file'
+      ? '先用 write_file 写入开头一部分，再用 append: true 分次追加其余部分。'
+      : '把内容拆成多次较小的调用依次完成。'
+  if (cause === 'refusal')
+    return (
+      `内容被拦截：本次 ${name} 调用的参数写到约 ${partialChars} 字符时被服务商的内容安全审核拦截，` +
+      `未执行，没有产生任何改动。${streak > 1 ? `这已是连续第 ${streak} 次被拦截。` : ''}` +
+      `可换种表述或拆成更小的几段重试；仍被拦截就停下，告诉用户哪部分内容写不进去。`
+    )
+  if (cause === 'invalid')
+    return (
+      `参数无效：本次 ${name} 调用的参数（约 ${partialChars} 字符）不是完整、合法的 JSON，无法解析，` +
+      `未执行，没有产生任何改动。${streak > 1 ? `这已是连续第 ${streak} 次参数无效，请把每段切得更小。` : ''}` +
+      `参数过长时容易被中途截断，请重新调用并确保参数是合法 JSON；内容较长时请分段完成，` +
+      `每段控制在约 ${limit} 字符以内：${split}`
+    )
   return (
     `输出长度超限：本次 ${name} 调用的参数写到约 ${partialChars} 字符时达到单次回复的输出上限，被截断，` +
-    `未执行，没有产生任何改动。${again}请分段完成，每段控制在约 ${limit} 字符以内：` +
-    (name === 'write_file'
-      ? '先用 write_file 写入开头一部分，再用 append: true 分次追加其余部分。'
-      : '把内容拆成多次较小的调用依次完成。')
+    `未执行，没有产生任何改动。${streak > 1 ? `这已是连续第 ${streak} 次截断，请把每段切得更小。` : ''}` +
+    `请分段完成，每段控制在约 ${limit} 字符以内：${split}`
   )
 }
 
@@ -2461,7 +2489,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // （之后追加的助手输出 / 工具结果不在读数里，由判定函数另行估算补上）。
     let usedInput = 0
     let usedAt = 0
-    // 连续被输出上限截断的步数（见 MAX_TRUNCATED_STREAK）：工具参数截断与「只思考 / 半截正文」截断共用。
+    // 连续被截断的步数（见 MAX_TRUNCATED_STREAK）：工具参数残缺与「只思考 / 半截正文」截断共用。
     let truncatedStreak = 0
     // 本轮已因上下文超限强制压缩重试过（每轮至多一次：压完仍超限说明单步就装不下，再试无益）。
     let contextRetried = false
@@ -2487,8 +2515,14 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         usedInput = 0 // 历史已改写，旧读数作废：回退估算，直到本步拿到新读数
 
       let assistantText = ''
-      // truncated = 参数被输出上限截断时已写出的字符数：这种调用只记录、不执行（见下方工具循环）。
-      let toolCalls: { id: string; name: string; args: unknown; truncated?: number }[] = []
+      // truncated = 参数残缺时已写出的字符数、cause = 残缺原因：这种调用只记录、不执行（见下方工具循环）。
+      let toolCalls: {
+        id: string
+        name: string
+        args: unknown
+        truncated?: number
+        cause?: BrokenCallCause
+      }[] = []
       let stopReason: StopReason = 'end_turn'
       // 本步被中止 / 出错打断（而非干净结束）：仍落地已收到的部分，见下方提交段。
       let interrupted: 'aborted' | 'error' | null = null
@@ -2560,11 +2594,17 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
                 ...(evMeta ?? {})
               })
           } else if (ev.type === 'tool_call_truncated') {
-            // 参数写到一半撞上输出上限：记成一次调用（进历史、画普通工具卡——哪怕是 ask_user /
-            // exit_plan，它们也没法被答复），由工具循环直接回灌「请分段写」，绝不执行。
+            // 参数残缺（撞上输出上限 / 被内容拦截 / 坏 JSON）：记成一次调用（进历史、画普通工具卡——
+            // 哪怕是 ask_user / exit_plan，它们也没法被答复），由工具循环直接回灌纠正提示，绝不执行。
             const id = ev.id || `call_${randomUUID()}`
             const input = truncatedCallInput(ev.partialArgs)
-            toolCalls.push({ id, name: ev.name, args: input, truncated: ev.partialArgs.length })
+            toolCalls.push({
+              id,
+              name: ev.name,
+              args: input,
+              truncated: ev.partialArgs.length,
+              cause: ev.cause
+            })
             emit(turnId, sessionId, {
               type: 'tool_call',
               id,
@@ -2805,9 +2845,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         // 余下未执行的由循环后的 fillUnrun 补占位。直接 return 会把 resultParts 整个丢掉。
         if (controller.signal.aborted) break
 
-        // 被输出上限截断的调用：参数残缺，不过闸门、不执行，回灌失败结果让模型分段重来。
+        // 参数残缺的调用：不过闸门、不执行，回灌失败结果让模型分段重来。
         if (tc.truncated !== undefined) {
-          const label = '输出超长，未执行'
+          const cause = tc.cause ?? 'max_tokens'
+          const label = BROKEN_CALL_LABEL[cause]
           args.onToolSummary?.(tc.id, label)
           emit(turnId, sessionId, {
             type: 'tool_result',
@@ -2820,7 +2861,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           resultParts.push({
             type: 'tool_result',
             toolUseId: tc.id,
-            content: truncatedCallResult(tc.name, tc.truncated, truncatedStreak),
+            content: truncatedCallResult(tc.name, tc.truncated, cause, truncatedStreak),
             isError: true
           })
           continue
