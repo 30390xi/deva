@@ -156,7 +156,6 @@ export function TaskPersonaSelect({
         <>
           <div className="model-pick__backdrop" onClick={() => setOpen(false)} />
           <div className="model-pick__menu" role="menu">
-            {enabled.length === 0 && <div className="model-pick__empty">{t('cf.noPersona')}</div>}
             {enabled.map((p) => {
               const active = value === p.id
               return (

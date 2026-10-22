@@ -849,6 +849,7 @@ function Rail({
         )}
       </div>
 
+      {/* 角色 tab：角色为空只会是还没加载完（默认角色 Deva 删不掉），先留空，不落到「未找到匹配项」。 */}
       <div className="cf-list">
         {tab === 'chats' ? (
           ordered.length === 0 ? (
@@ -875,9 +876,7 @@ function Rail({
               />
             ))
           )
-        ) : personas.length === 0 ? (
-          <div className="cf-empty">{t('cf.noPersona')}</div>
-        ) : shownPersonas.length === 0 ? (
+        ) : personas.length === 0 ? null : shownPersonas.length === 0 ? (
           <div className="cf-empty">{t('cf.searchNoResults')}</div>
         ) : (
           shownPersonas.map((p) => (
@@ -2077,7 +2076,7 @@ function PersonaRow({
 /**
  * 左侧对话被清空后中列的落点：列出花名册全部角色，点头像/卡片直接与该角色开启新对话
  * （onStart → startWith：新建并落盘一条绑定该角色的空对话，随即切入消息视图）。
- * 花名册为空时给出「先去添加角色」的提示（与角色 tab 空态一致）。
+ * 默认角色 Deva 删不掉，花名册只在加载完成前为空，此时网格先留空。
  */
 function QuickStart({
   personas,
@@ -2094,24 +2093,20 @@ function QuickStart({
         <div className="cf-quick__inner">
           <div className="cf-quick__title">{t('cf.quickStartTitle')}</div>
           <div className="cf-quick__hint">{t('cf.quickStartHint')}</div>
-          {personas.length === 0 ? (
-            <div className="cf-empty">{t('cf.noPersona')}</div>
-          ) : (
-            <div className="cf-quick__grid">
-              {personas.map((p) => (
-                <button
-                  key={p.id}
-                  className="cf-qcard"
-                  onClick={() => onStart(p.id)}
-                  title={p.desc || p.name}
-                >
-                  <Avatar persona={p} size={48} />
-                  <span className="cf-qcard__name">{p.name}</span>
-                  {p.desc && <span className="cf-qcard__desc">{p.desc}</span>}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="cf-quick__grid">
+            {personas.map((p) => (
+              <button
+                key={p.id}
+                className="cf-qcard"
+                onClick={() => onStart(p.id)}
+                title={p.desc || p.name}
+              >
+                <Avatar persona={p} size={48} />
+                <span className="cf-qcard__name">{p.name}</span>
+                {p.desc && <span className="cf-qcard__desc">{p.desc}</span>}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </main>
@@ -3229,8 +3224,14 @@ function Conversation({
   // 底部工作状态行。本轮已有「工作过程」折叠条时，常规的「正在做什么 + 计时」已在折叠条里，只剩等待作答 /
   // 重连 / 压缩这些特殊状态；它们放进这条消息的末尾，紧跟步骤与卡片——放在消息列表下面的话，进行中消息底部
   // 撑住的空白（见 ConvMessage）会把它和上面的步骤隔开。还没有折叠条时照常放在列表下方。
+  // 回复还什么都没出（思考中）时也放进这条消息，就在角色名下面、正文将出现的位置；正文一到即被替换。
   const lastMsg = messages[messages.length - 1]
   const folded = streaming && lastMsg?.role === 'assistant' && hasProcess(lastMsg.blocks)
+  const blank =
+    streaming &&
+    lastMsg?.role === 'assistant' &&
+    lastMsg.blocks.every((b) => b.kind === 'step' || (b.kind === 'text' && !b.text.trim()))
+  const statusInMsg = folded || blank
   const statusLine = streaming ? (
     <StatusIndicator activity={deriveActivity(messages)} status={streamStatus} folded={folded} onStop={onStop} />
   ) : null
@@ -3245,7 +3246,7 @@ function Conversation({
       active={!selecting && streaming && i === messages.length - 1}
       latest={i === messages.length - 1}
       elapsedSec={i === messages.length - 1 ? streamStatus.elapsedSec : 0}
-      footer={folded && !selecting && i === messages.length - 1 ? statusLine : undefined}
+      footer={statusInMsg && !selecting && i === messages.length - 1 ? statusLine : undefined}
       dataTurn={turn}
       onAsk={onAsk}
       onPlan={onPlan}
@@ -3316,7 +3317,7 @@ function Conversation({
             ) : (
               <>
                 {messages.map((m, i) => renderMsg(m, i, turnOf[i]))}
-                {!folded && statusLine}
+                {!statusInMsg && statusLine}
                 {/* 已有对话但模型被删光：引导卡接在末尾（不进对话记录）。 */}
                 {needModelSetup && !streaming && <ModelSetupCard />}
               </>
@@ -3597,7 +3598,7 @@ function ConvMessage({
   latest: boolean
   /** 本轮已用秒数（进行中的折叠条标题末尾显示；只对 active 的消息有意义）。 */
   elapsedSec: number
-  /** 接在消息内容末尾的底部状态行（等待作答 / 重连 / 压缩；只交给进行中且已有折叠条的那条）。 */
+  /** 接在消息内容末尾的底部状态行（只交给进行中的那条：已有折叠条时是等待作答 / 重连 / 压缩，还没内容时是思考中）。 */
   footer?: React.ReactNode
   /** 该消息所属的对话轮下标（0 基）；标注在根节点上，供右键菜单定位「删除此轮」。前言/未知为 undefined。 */
   dataTurn?: number
@@ -3740,13 +3741,13 @@ function ConvMessage({
         limit={5}
       />
     ) : undefined
+  // 有工作过程时，角色名与折叠条同一行（「Deva › 已处理 … · N 步」）；没有时单独一行。
+  const name = <span className="cf-msg__name">{owner?.name ?? t('cf.assistant')}</span>
   return (
     <div className="cf-msg" data-turn={dataTurn}>
       <Avatar persona={owner} size={32} />
       <div className="cf-msg__body">
-        <div className="cf-msg__head">
-          <span className="cf-msg__name">{owner?.name ?? t('cf.assistant')}</span>
-        </div>
+        {!split && <div className="cf-msg__head">{name}</div>}
         <div
           className="msg__content"
           ref={contentRef}
@@ -3764,6 +3765,7 @@ function ConvMessage({
                 preview={preview}
                 open={processOpen}
                 onToggle={() => setProcessOpen((v) => !v)}
+                lead={name}
               >
                 {renderBlocks(split.process, true)}
               </ProcessFold>

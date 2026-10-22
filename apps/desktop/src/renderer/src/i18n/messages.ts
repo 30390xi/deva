@@ -858,7 +858,6 @@ const zhCN: MessageTree = {
     tabChats: '消息',
     tabRoster: '角色',
     tabTasks: '定时任务',
-    noPersona: '还没有角色，点下方「添加角色」创建一个',
     addPersona: '添加角色',
     addByChat: '通过对话添加',
     addByChatPrompt: '我想创建一个新角色，请一步步引导我明确它的定位、性格与专长，最后用角色名片提交给我确认。',
@@ -1956,7 +1955,6 @@ const en: MessageTree = {
     tabChats: 'Chats',
     tabRoster: 'Roster',
     tabTasks: 'Tasks',
-    noPersona: 'No personas yet — click “Add persona” below to create one',
     addPersona: 'Add persona',
     addByChat: 'Add via chat',
     addByChatPrompt:

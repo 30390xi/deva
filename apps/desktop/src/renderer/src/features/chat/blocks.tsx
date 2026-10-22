@@ -3,6 +3,7 @@ import {
   Square,
   Sparkles,
   Check,
+  ChevronDown,
   ChevronRight,
   FileText,
   FolderTree,
@@ -1509,6 +1510,8 @@ function formatDuration(sec: number, t: (key: string) => string): string {
  * 旧对话回落为「已执行 7 步」，只有思考时为「已思考」。失败不进标题——过程中的失败多是参数不对、
  * 随即重试，展开后节点已标红；真正的错误由外面的错误块呈现。
  * 展开后按原顺序画出整条时间轴（children 由调用方给出，复用其块渲染）；展开态由调用方保管，跨过回合结束不变。
+ * lead：排在折叠条同一行最前面的内容（对话区传角色名，显示为「Deva  已处理 … · N 步 ⌄」）。带 lead 时
+ * 箭头挪到文字末尾、朝下（展开后朝上）：夹在名字和文字之间读起来像层级路径，也看不出是展开按钮。
  */
 export function ProcessFold({
   blocks,
@@ -1518,6 +1521,7 @@ export function ProcessFold({
   preview,
   open,
   onToggle,
+  lead,
   children
 }: {
   blocks: ChatBlock[]
@@ -1528,6 +1532,7 @@ export function ProcessFold({
   preview?: React.ReactNode
   open: boolean
   onToggle: () => void
+  lead?: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {
   const { t } = useI18n()
@@ -1546,17 +1551,28 @@ export function ProcessFold({
       t(live || durationMs !== undefined ? 'chat.process.count' : 'chat.process.steps').replace('{n}', String(calls))
     )
   const title = parts.length > 0 ? parts.join(' · ') : t('chat.thought')
+  const head = (
+    <button type="button" className="msg__process-head" aria-expanded={open} onClick={onToggle}>
+      {!lead && <ChevronRight size={13} className="msg__process-caret" />}
+      <span>
+        {title}
+        {live && elapsedSec !== undefined && (
+          <span className="msg__process-time"> · {formatDuration(elapsedSec, t)}</span>
+        )}
+      </span>
+      {lead && <ChevronDown size={13} className="msg__process-caret" />}
+    </button>
+  )
   return (
-    <div className={`msg__process${open ? ' is-open' : ''}`}>
-      <button type="button" className="msg__process-head" aria-expanded={open} onClick={onToggle}>
-        <ChevronRight size={13} className="msg__process-caret" />
-        <span>
-          {title}
-          {live && elapsedSec !== undefined && (
-            <span className="msg__process-time"> · {formatDuration(elapsedSec, t)}</span>
-          )}
-        </span>
-      </button>
+    <div className={`msg__process${open ? ' is-open' : ''}${lead ? ' has-lead' : ''}`}>
+      {lead ? (
+        <div className="msg__process-row">
+          {lead}
+          {head}
+        </div>
+      ) : (
+        head
+      )}
       {open ? (
         <div className="msg__process-body">{children}</div>
       ) : (

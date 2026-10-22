@@ -610,6 +610,10 @@ textarea {
 .msg__content > .chat__status {
   margin-top: var(--space-3);
 }
+/* 回复还没内容时（思考中）：状态行就占正文的位置，紧跟在角色名下面 */
+.msg__content > .chat__status:first-child {
+  margin-top: 0;
+}
 .chat__status-time {
   margin-left: auto;
   font-size: 12px;
@@ -2802,6 +2806,24 @@ button.tl__line:hover {
  */
 .msg__process {
   margin-top: var(--space-2);
+}
+/* 带角色名（对话区）：名字与折叠条同一行，就是这条消息的首行，不再留块间距 */
+.msg__process.has-lead {
+  margin-top: 0;
+}
+.msg__process-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+}
+/* 带角色名时箭头在文字末尾、朝下，展开后朝上（不带名字时是前置的右箭头，展开转 90°） */
+.msg__process.has-lead .msg__process-head {
+  gap: 4px;
+}
+.msg__process.has-lead.is-open .msg__process-caret {
+  transform: rotate(180deg);
 }
 .msg__process-head {
   display: flex;
