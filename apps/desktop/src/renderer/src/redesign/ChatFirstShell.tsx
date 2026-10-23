@@ -4073,6 +4073,7 @@ function Composer({
 }): React.JSX.Element {
   const { t, locale } = useI18n()
   const { skills } = useExtensions()
+  const toast = useToast()
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<Picked[]>([])
   const pendingRef = useRef(pending)
@@ -4171,49 +4172,83 @@ function Composer({
     })()
   }
 
-  const pickFiles = async (): Promise<void> => {
-    if (streaming) return
-    const picked = (await window.deva.fs.pickAttachments()) as Picked[]
-    if (!picked.length) return
+  // 新增附件并入 pending：不支持 / 过大的不加入（加了也发不出去），toast 说明哪些被跳过；按路径去重。
+  const addPicked = (picked: Picked[]): void => {
+    const bad = picked.filter((p) => !p.supported)
+    if (bad.length) {
+      const names = bad.map((p) => p.name).join(locale === 'en' ? ', ' : '、')
+      toast.show({ variant: 'warning', message: t('cf.attachSkipped').replace('{names}', names) })
+    }
     setPending((prev) => {
       const seen = new Set(prev.map((p) => p.path))
-      return [...prev, ...picked.filter((p) => !seen.has(p.path))]
+      const out = [...prev]
+      for (const p of picked) {
+        if (!p.supported || seen.has(p.path)) continue
+        seen.add(p.path)
+        out.push(p)
+      }
+      return out
     })
   }
 
-  // 粘贴图片 / 文档：与「附加文件」同一条链路（主进程授权 → pending 附件条）。
+  const pickFiles = async (): Promise<void> => {
+    if (streaming) return
+    addPicked((await window.deva.fs.pickAttachments()) as Picked[])
+  }
+
+  // 粘贴 / 拖入的文件：与「附加文件」同一条链路（主进程落盘授权 → pending 附件条）。
+  // 只交字节不交路径，渲染层仍无法让主进程读任意路径；拖入的文件夹读不出字节，直接跳过。
+  const addFiles = async (files: File[]): Promise<void> => {
+    const results = await Promise.allSettled(
+      files.map(async (f) =>
+        window.deva.fs.pasteAttachment({
+          name: f.name,
+          mime: f.type,
+          size: f.size,
+          // 超过最大附件上限（PDF 20MB）的不读字节，只报体积，主进程据此判「过大」。
+          data: f.size > 20 * 1024 * 1024 ? null : new Uint8Array(await f.arrayBuffer())
+        })
+      )
+    )
+    // 同一文件多次粘贴 / 拖入只留一份：主进程按内容去重、重复的返回同一路径，addPicked 按路径过滤即可。
+    addPicked(results.flatMap((r) => (r.status === 'fulfilled' ? [r.value as Picked] : [])))
+  }
+
   // 剪贴板带纯文本时一律按文本粘贴——Word / Excel 复制内容会顺带一张渲染图，不能把它变成附件。
   const onPaste = (e: ClipboardEvent): boolean => {
     const files = Array.from(e.clipboardData?.files ?? [])
     if (!files.length || e.clipboardData?.getData('text/plain')) return false
     e.preventDefault()
-    if (streaming) return true
-    void (async () => {
-      const picked = await Promise.all(
-        files.map(async (f) =>
-          window.deva.fs.pasteAttachment({
-            name: f.name,
-            mime: f.type,
-            size: f.size,
-            // 超过最大附件上限（PDF 20MB）的不读字节，只报体积，主进程据此判「过大」。
-            data: f.size > 20 * 1024 * 1024 ? null : new Uint8Array(await f.arrayBuffer())
-          })
-        )
-      )
-      // 同一文件多次粘贴只留一份：主进程按内容去重、重复粘贴返回同一路径，此处按路径过滤即可。
-      setPending((prev) => {
-        const seen = new Set(prev.map((p) => p.path))
-        const out = [...prev]
-        for (const p of picked as Picked[]) {
-          if (seen.has(p.path)) continue
-          seen.add(p.path)
-          out.push(p)
-        }
-        return out
-      })
-    })()
+    if (!streaming) void addFiles(files)
     return true
   }
+
+  // 拖入文件：整个窗口都可放下，一律转成附件。Chromium 对未拦截的文件拖放默认「打开该文件」
+  // （导航离开应用），故凡带文件的 dragover / drop 都 preventDefault；回复中只拦截不附加，同粘贴。
+  const addFilesRef = useRef(addFiles)
+  addFilesRef.current = addFiles
+  const streamingRef = useRef(streaming)
+  streamingRef.current = streaming
+  useEffect(() => {
+    const hasFiles = (e: DragEvent): boolean => Boolean(e.dataTransfer?.types.includes('Files'))
+    const onDragOver = (e: DragEvent): void => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = streamingRef.current ? 'none' : 'copy'
+    }
+    const onDrop = (e: DragEvent): void => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      if (files.length && !streamingRef.current) void addFilesRef.current(files)
+    }
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [])
 
   const removePending = (path: string): void =>
     setPending((prev) => prev.filter((p) => p.path !== path))

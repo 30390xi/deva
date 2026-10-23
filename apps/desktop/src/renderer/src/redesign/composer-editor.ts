@@ -17,6 +17,7 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
   PASTE_COMMAND,
+  DROP_COMMAND,
   RootNode,
   SKIP_DOM_SELECTION_TAG,
   TextNode,
@@ -211,6 +212,12 @@ export function useComposerEditor(handlers: ComposerEditorHandlers): ComposerEdi
       editor.registerCommand(
         PASTE_COMMAND,
         (e) => e instanceof ClipboardEvent && handlersRef.current.onPaste(e),
+        COMMAND_PRIORITY_HIGH
+      ),
+      // 拖入文件：不让 Lexical 按文本落入，事件继续冒泡，由外层在窗口级统一转成附件。
+      editor.registerCommand(
+        DROP_COMMAND,
+        (e) => Boolean(e.dataTransfer?.types.includes('Files')),
         COMMAND_PRIORITY_HIGH
       )
     )
