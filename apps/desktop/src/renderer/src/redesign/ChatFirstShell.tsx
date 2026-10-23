@@ -116,6 +116,7 @@ import {
   ICONRAIL_W,
   ICONRAIL_W_MAC,
   ResizeHandle,
+  SIDEBAR_COLLAPSE_AT,
   SIDEBAR_DEFAULT,
   clampComposer,
   clampSidebar,
@@ -352,6 +353,77 @@ export function ChatFirstShell(): React.JSX.Element {
   const sidebarShown = clampSidebar(sidebarW, viewport.w, railW)
   const sidebarRef = useRef(sidebarShown)
   sidebarRef.current = sidebarShown
+  // 收起会话列表：只有「对话」页能收起（角色页右侧只是资料卡，收起没意义；定时任务 / 机器人页本就占满）。
+  // 收起状态记住（切页再回来、重启都保持）。收起时悬停「对话」图标，列表整块浮在对话区上方（peek），
+  // 点会话即切过去（列表留着，可以接着点别的，鼠标离开才收回）——不用先展开就能换对话。
+  const [listCollapsed, setListCollapsed] = useState(() => loadLayout().sidebarCollapsed ?? false)
+  const collapsed = railTab === 'chats' && listCollapsed
+  const [peek, setPeek] = useState(false)
+  const peekTimer = useRef<number | null>(null)
+  const clearPeekTimer = (): void => {
+    if (peekTimer.current !== null) window.clearTimeout(peekTimer.current)
+    peekTimer.current = null
+  }
+  const setCollapsed = (next: boolean): void => {
+    clearPeekTimer()
+    setPeek(false)
+    setListCollapsed(next)
+    saveLayout({ sidebarCollapsed: next || undefined })
+  }
+  // 浮出：停 0.2 秒才浮出（鼠标路过不弹）；离开图标与列表 0.15 秒才收回（从图标移到列表要穿过图标栏右侧
+  // 约 9px 的空白；再长收回就显得拖沓。同「新建对话」悬停菜单的 0.14 秒）。
+  // 已浮出时再进入只取消待收回、不排定时器——否则点了会话（收回）后排着的定时器会把它重新打开。
+  const peekEnter = (): void => {
+    if (!collapsed) return
+    clearPeekTimer()
+    if (!peek) peekTimer.current = window.setTimeout(() => setPeek(true), 200)
+  }
+  // 进入浮出的列表：只取消待收回。浮出只由悬停「对话」图标触发——收起过程中（或刚拖动收起）鼠标还停在
+  // 列表上，不该因此又浮出来。
+  const peekHover = useRef(false)
+  const peekStay = (): void => {
+    peekHover.current = true
+    if (peek) clearPeekTimer()
+  }
+  // 正在浮出列表的输入框（搜索框、菜单里的筛选框）里打字：打字时鼠标常挪开、输入法候选框也会盖到指针上，
+  // 这时不因鼠标离开而收回，等焦点离开输入框再说（见 peekFocusOut）。
+  const typingInPeek = (): boolean => {
+    const el = document.activeElement
+    return el instanceof HTMLInputElement && el.closest('.cf-rail.is-peek') !== null
+  }
+  const peekLeave = (): void => {
+    peekHover.current = false
+    if (!collapsed) return
+    clearPeekTimer()
+    peekTimer.current = window.setTimeout(() => {
+      if (!typingInPeek()) setPeek(false)
+    }, 150)
+  }
+  // 焦点离开浮出列表里的输入框（点了别处、切走窗口）：鼠标也不在列表上就收回。
+  const peekFocusOut = (): void => {
+    if (peek && !peekHover.current) setPeek(false)
+  }
+  useEffect(() => clearPeekTimer, [])
+  // 离开对话页：收回浮出列表。切换对话不收回——可以连着点开几个看，鼠标离开列表才收回。
+  useEffect(() => {
+    clearPeekTimer()
+    setPeek(false)
+  }, [railTab])
+  // Esc 收回浮出列表；Ctrl+B / ⌘B 在对话页收起 / 展开会话列表。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && peek) {
+        clearPeekTimer()
+        setPeek(false)
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === 'KeyB' && railTab === 'chats') {
+        e.preventDefault()
+        setCollapsed(!listCollapsed)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peek, railTab, listCollapsed])
   /**
    * 「角色」tab 当前选中的角色（右侧显示其资料卡）。仅当 railTab==='roster' 时生效——右侧内容整体由
    * railTab 决定，故「消息」tab 与「角色」tab 各自记住自己的右侧（当前对话 / 当前角色），彼此独立、
@@ -554,27 +626,47 @@ export function ChatFirstShell(): React.JSX.Element {
       {/* 无独立标题栏（微信式）：最小化/最大化/关闭用系统原生窗口控件叠加（titleBarOverlay），
           此处不再自绘按钮，避免与原生按钮重影。拖拽交给图标栏与对话头。 */}
       <div
-        className="cf-body"
+        className={`cf-body${collapsed && peek ? ' is-peeking' : ''}`}
         style={
-          { '--cf-rail-w': `${railW}px`, '--cf-side': `${sidebarShown}px` } as React.CSSProperties
+          {
+            '--cf-rail-w': `${railW}px`,
+            '--cf-side': `${collapsed ? 0 : sidebarShown}px`,
+            '--cf-side-open': `${sidebarShown}px`
+          } as React.CSSProperties
         }
       >
-        {/* 面板右缘拖拽手柄（覆盖在分隔线上，绝对定位不占网格单元）；定时任务 tab 的列表列同宽同享。 */}
-        <ResizeHandle
-          axis="x"
-          value={sidebarShown}
-          title={t('cf.resizeSidebar')}
-          style={{ left: `calc(${railW}px + ${sidebarShown}px)` }}
-          onChange={(v) => setSidebarW(clampSidebar(v, window.innerWidth, railW))}
-          onCommit={() => saveLayout({ sidebarWidth: sidebarRef.current })}
-          onReset={() => {
-            setSidebarW(SIDEBAR_DEFAULT)
-            saveLayout({ sidebarWidth: undefined })
-          }}
-        />
+        {/* 面板右缘拖拽手柄（覆盖在分隔线上，绝对定位不占网格单元）；定时任务 tab 的列表列同宽同享。
+            对话页：往左拖过下限继续拖即收起（手柄随之卸下、这次拖动结束）。收起后不显示手柄：往外拖要拖够
+            距离才生效、中间没有跟手的反馈，展开交给「对话」图标 / Ctrl+B。 */}
+        {!collapsed && (
+          <ResizeHandle
+            axis="x"
+            value={sidebarShown}
+            title={t('cf.resizeSidebar')}
+            style={{ left: `calc(${railW}px + ${sidebarShown}px)` }}
+            onChange={(v) => {
+              if (railTab === 'chats' && v < SIDEBAR_COLLAPSE_AT) {
+                // 收起后手柄卸下、不再走 onCommit：拖到下限前改过的宽度在这里落盘。
+                saveLayout({ sidebarWidth: sidebarRef.current })
+                setCollapsed(true)
+                return
+              }
+              setSidebarW(clampSidebar(v, window.innerWidth, railW))
+            }}
+            onCommit={() => saveLayout({ sidebarWidth: sidebarRef.current })}
+            onReset={() => {
+              setSidebarW(SIDEBAR_DEFAULT)
+              saveLayout({ sidebarWidth: undefined })
+            }}
+          />
+        )}
         <IconRail
           tab={railTab}
-          onTab={setRailTab}
+          // 点亮着的「对话」图标 = 收起 / 展开会话列表；点别的图标照常切页。
+          onTab={(tab) => (tab === 'chats' && railTab === 'chats' ? setCollapsed(!listCollapsed) : setRailTab(tab))}
+          listCollapsed={collapsed}
+          onChatsHover={peekEnter}
+          onChatsLeave={peekLeave}
           onOpenSettings={() => setSettingsOpen(true)}
           chatAlert={chatAlert}
         />
@@ -608,6 +700,11 @@ export function ChatFirstShell(): React.JSX.Element {
               onDeleteThread={deleteThread}
               onDeletePersona={deletePersona}
               onReorderPersonas={reorderPersonas}
+              collapsed={collapsed}
+              peek={collapsed && peek}
+              onHover={peekStay}
+              onLeave={peekLeave}
+              onInputBlur={peekFocusOut}
             />
             {railTab === 'roster' ? (
               // 「角色」tab：右侧显示选中角色的资料卡；未选中（或角色已删）则给出提示。
@@ -667,17 +764,29 @@ export function ChatFirstShell(): React.JSX.Element {
 function IconRail({
   tab,
   onTab,
+  listCollapsed,
+  onChatsHover,
+  onChatsLeave,
   onOpenSettings,
   chatAlert
 }: {
   tab: RailTab
+  /** 点亮着的「对话」图标也回调（由调用方切换会话列表的收起 / 展开）。 */
   onTab: (t: RailTab) => void
+  /** 对话页的会话列表已收起：「对话」图标的提示改为「展开会话列表」，红点也显示在它上面。 */
+  listCollapsed: boolean
+  /** 悬停 / 离开「对话」图标（收起时据此浮出列表）。 */
+  onChatsHover: () => void
+  onChatsLeave: () => void
   onOpenSettings: () => void
   /** 其他对话有新消息或待你处理 → 按钮上显示红点。 */
   chatAlert: boolean
 }): React.JSX.Element {
   const { t } = useI18n()
   const [profileOpen, setProfileOpen] = useState(false)
+  // 亮着的「对话」图标点了是收起 / 展开，提示写明，免得点了以为列表丢了。
+  const chatsLabel =
+    tab !== 'chats' ? t('cf.tabChats') : listCollapsed ? t('cf.expandList') : t('cf.collapseList')
   return (
     <nav className="cf-iconrail">
       <button
@@ -692,14 +801,17 @@ function IconRail({
       {profileOpen && <ProfilePanel onClose={() => setProfileOpen(false)} />}
       <button
         className={`cf-navbtn${tab === 'chats' ? ' is-active' : ''}`}
-        title={t('cf.tabChats')}
-        aria-label={t('cf.tabChats')}
+        title={chatsLabel}
+        aria-label={chatsLabel}
         aria-current={tab === 'chats'}
+        aria-expanded={tab === 'chats' ? !listCollapsed : undefined}
         onClick={() => onTab('chats')}
+        onMouseEnter={onChatsHover}
+        onMouseLeave={onChatsLeave}
       >
         <MessageCircle size={20} />
-        {/* 不在对话页时，才在导航按钮上提示其他对话的动静（在对话页时列表头像已能看到）。 */}
-        {tab !== 'chats' && chatAlert && (
+        {/* 看不到会话列表时（不在对话页，或列表已收起），在导航按钮上提示其他对话的动静。 */}
+        {(tab !== 'chats' || listCollapsed) && chatAlert && (
           <span className="cf-navbtn__dot" aria-hidden="true" />
         )}
       </button>
@@ -765,7 +877,12 @@ function Rail({
   onRenameThread,
   onDeleteThread,
   onDeletePersona,
-  onReorderPersonas
+  onReorderPersonas,
+  collapsed,
+  peek,
+  onHover,
+  onLeave,
+  onInputBlur
 }: {
   tab: 'chats' | 'roster'
   sessions: SessionMeta[]
@@ -785,6 +902,15 @@ function Rail({
   onDeleteThread: (id: string, title: string) => void
   onDeletePersona: (id: string, name: string) => void
   onReorderPersonas: (ids: string[]) => void
+  /** 会话列表已收起（列宽归零、列表藏在对话区下面）。 */
+  collapsed: boolean
+  /** 收起时浮出：整块浮在对话区上方。 */
+  peek: boolean
+  /** 鼠标进出列表（浮出时据此决定收回）。右键菜单、新建菜单都是列表的子元素，停在上面不算离开。 */
+  onHover: () => void
+  onLeave: () => void
+  /** 焦点离开列表里的输入框（且没落在列表内别处）：浮出时据此决定收回。 */
+  onInputBlur: () => void
 }): React.JSX.Element {
   const { t } = useI18n()
   // 右键菜单态（对话/角色行共用一个，同一时刻至多一个）。
@@ -800,6 +926,17 @@ function Rail({
   useEffect(() => {
     setQuery('')
   }, [tab])
+  const asideRef = useRef<HTMLElement>(null)
+  // 收起后浮出列表收回时：连带关掉在它里面打开的右键菜单（否则菜单留在隐藏的列表里，下次浮出时它的全屏
+  // 透明背板跟着回来，第一下点击被背板吃掉）；清空搜索词（浮出列表是临时的，下次浮出不该还是筛过的样子）；
+  // 焦点若还在列表里（如搜索框）也移走，免得接着打字打进看不见的框。
+  useEffect(() => {
+    if (!collapsed || peek) return
+    setMenu(null)
+    setQuery('')
+    const el = document.activeElement
+    if (el instanceof HTMLElement && asideRef.current?.contains(el)) el.blur()
+  }, [collapsed, peek])
   // 归一化后的检索词（去空白 + 小写）；空则视为不过滤。
   const q = query.trim().toLowerCase()
   // 消息列表按最近更新降序，再按检索词过滤（标题 + 所属角色名，均大小写不敏感）。
@@ -842,7 +979,17 @@ function Rail({
     onReorderPersonas([id, ...ids.filter((x) => x !== id)])
   }
   return (
-    <aside className="cf-rail">
+    <aside
+      ref={asideRef}
+      className={`cf-rail${collapsed ? ' is-collapsed' : ''}${peek ? ' is-peek' : ''}`}
+      aria-hidden={collapsed && !peek ? true : undefined}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      onBlur={(e) => {
+        const to = e.relatedTarget
+        if (e.target instanceof HTMLInputElement && !(to instanceof Node && e.currentTarget.contains(to))) onInputBlur()
+      }}
+    >
       {/* 顶部：搜索占满整行；消息 tab 并排「新建对话」入口（悬停出角色列表），角色 tab 并排「添加角色」入口（悬停/点击出二选一弹层）。 */}
       <div className="cf-rail__top">
         <div className="cf-search">

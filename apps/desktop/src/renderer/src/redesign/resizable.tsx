@@ -9,6 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 export interface Layout {
   /** 左侧对话面板宽（px）；缺省 = 默认宽。 */
   sidebarWidth?: number
+  /** 「对话」页的会话列表已收起（只有对话页能收起）；缺省 = 展开。 */
+  sidebarCollapsed?: boolean
   /** 输入框高度（px，文本区固定高、内容溢出框内滚动）；缺省 = COMPOSER_DEFAULT。 */
   composerHeight?: number
 }
@@ -16,6 +18,8 @@ export interface Layout {
 export const SIDEBAR_DEFAULT = 300
 export const SIDEBAR_MIN = 220
 export const SIDEBAR_MAX = 480
+/** 把对话页的会话列表往左拖到比这还窄（已低于下限、继续拖）就收起；收起后往右拖过它即拉出来。 */
+export const SIDEBAR_COLLAPSE_AT = 140
 /** 图标栏宽（经 --cf-rail-w 驱动 .cf-body 首列）；macOS 红绿灯可见时加宽到能放下整组按钮。 */
 export const ICONRAIL_W = 56
 export const ICONRAIL_W_MAC = 72

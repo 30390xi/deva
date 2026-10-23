@@ -31,6 +31,16 @@
      第二列（对话面板）宽由 --cf-side 驱动：可拖动，JS 侧已按上下限与窗口宽夹取。 */
   grid-template-columns: var(--cf-rail-w, 56px) var(--cf-side, 300px) minmax(0, 1fr);
   min-height: 0;
+  /* 收起 / 展开会话列表时列宽平滑过渡；拖动手柄时关掉，免得宽度追着光标慢半拍 */
+  transition: grid-template-columns 0.16s ease;
+}
+.cf-resizing-x .cf-body {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-body {
+    transition: none;
+  }
 }
 
 /* ---------------------------- 拖拽调整尺寸手柄 ---------------------------- */
@@ -182,6 +192,48 @@ body.cf-resizing-y * {
   min-height: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
+}
+/*
+ * 会话列表收起：列宽归零（对话区随之平滑扩开），列表保持展开时的宽度、立即隐去。不留隐去延迟：列表里的头像、
+ * 新建按钮是定位元素，延迟期间会画在对话区上面、比别的内容晚消失。仍留在网格里占着第二列——改成脱离
+ * 文档流的话，对话区会被自动排进这一列。
+ */
+.cf-rail.is-collapsed {
+  width: var(--cf-side-open);
+  visibility: hidden;
+}
+/* 收起时悬停「对话」图标：列表整块浮在对话区上方（不挤占布局），低于弹框 */
+.cf-rail.is-collapsed.is-peek {
+  position: relative;
+  z-index: 45;
+  visibility: visible;
+  box-shadow: var(--shadow);
+  animation: cf-peek-in 0.14s ease;
+}
+/*
+ * 浮出期间列表顶行与对话区标题栏都不当窗口拖动区。鼠标在拖动区上会被系统当成在标题栏、网页收不到事件，
+ * 浮出列表就以为鼠标离开而收回：① 列表顶行本身是拖动区（只挖掉搜索框和新建按钮），从会话行往上移向
+ * 搜索框要经过它四周的空白；② 拖动区按 DOM 顺序计算、后来者覆盖，标题栏排在列表后面，会盖过浮出列表的顶行。
+ */
+.cf-rail.is-peek .cf-rail__top,
+.cf-body.is-peeking .cf-conv__head,
+.cf-body.is-peeking .cf-dragbar {
+  -webkit-app-region: no-drag;
+}
+@keyframes cf-peek-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-rail.is-collapsed.is-peek {
+    animation: none;
+  }
 }
 /* 角色列表：搜索行右侧的「添加角色」图标 */
 .cf-rail__addbtn {
