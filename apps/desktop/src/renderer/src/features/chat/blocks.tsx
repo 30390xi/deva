@@ -1092,6 +1092,9 @@ type ToolStep = { name: string; args: unknown; status: ToolStatus; summary?: str
 
 const isFailed = (status: ToolStatus): boolean => status === 'error' || status === 'denied'
 
+/** 不算原因的失败摘要（主进程旧版兜底写的就是它，旧对话里还存着）：照「没有原因」处理，只显示「失败」。 */
+const GENERIC_FAILURES = new Set(['失败', 'failed', 'Failed'])
+
 /** 节点图标：执行中转圈、失败打叉，其余按工具类型（未知工具为扳手）。 */
 function stepIcon(step: ToolStep, size: number): React.JSX.Element {
   if (step.status === 'running') return <Loader2 size={size} className="spin" />
@@ -1102,7 +1105,8 @@ function stepIcon(step: ToolStep, size: number): React.JSX.Element {
 
 /**
  * 一次工具调用的文字：动词 + 对象 + 结果说明（单行省略，完整对象挂在外层的悬停上）。
- * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝用红字写明原因。
+ * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝用红字直接写原因——红色叉号图标
+ * 已表明失败，不再加「失败：」前缀；没有具体原因时才写「失败」。
  * 时间轴与后台任务面板（每个后台子智能体的当前步骤）共用。
  */
 export function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
@@ -1118,8 +1122,8 @@ export function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
     const reason =
       step.status === 'denied'
         ? t('chat.status.denied')
-        : step.summary
-          ? t('chat.flow.failedWith').replace('{reason}', step.summary)
+        : step.summary && !GENERIC_FAILURES.has(step.summary)
+          ? step.summary
           : t('chat.flow.failed')
     tail = <span className="tl__err">{reason}</span>
   } else {

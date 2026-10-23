@@ -377,7 +377,6 @@ const zhCN: MessageTree = {
         unknown: '调用'
       },
       failed: '失败',
-      failedWith: '失败：{reason}',
       // 处置过的计划 / 挂载请求收进工作过程后的节点文字。
       plan: {
         approve: '已批准计划',
@@ -1473,7 +1472,6 @@ const en: MessageTree = {
         unknown: 'Call'
       },
       failed: 'failed',
-      failedWith: 'failed: {reason}',
       plan: {
         approve: 'Approved plan',
         keep: 'Asked to refine plan',

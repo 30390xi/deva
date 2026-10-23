@@ -1149,6 +1149,33 @@ function readImageResult(buf: Buffer, mime: ImageMime, abs: string): ToolResult 
   }
 }
 
+/** 系统 / 网络错误码 → 一句话原因（工具失败时界面上红字显示的就是它）。 */
+const ERROR_REASONS: Record<string, string> = {
+  ENOENT: '路径不存在',
+  EACCES: '没有权限',
+  EPERM: '没有权限',
+  EISDIR: '这是目录，不是文件',
+  ENOTDIR: '路径中有一段不是目录',
+  EBUSY: '文件被占用',
+  EEXIST: '已存在',
+  ENOTFOUND: '域名解析失败',
+  ECONNREFUSED: '连接被拒绝',
+  ECONNRESET: '连接被中断',
+  ETIMEDOUT: '连接超时'
+}
+
+/**
+ * 工具抛错时给界面的简短原因（摘要）：常见错误码译成一句话；其余取报错首行、截到 40 字。
+ * 界面直接把它当原因显示（不再加「失败：」前缀），所以不能只写「失败」。fetch 的网络错误码在 cause 上。
+ */
+function errorSummary(e: unknown): string {
+  const err = e as (Error & { code?: string; cause?: { code?: string } }) | undefined
+  const reason = ERROR_REASONS[err?.code ?? ''] ?? ERROR_REASONS[err?.cause?.code ?? '']
+  if (reason) return reason
+  const line = String(err?.message ?? e).split('\n')[0].trim()
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line || '失败'
+}
+
 export async function executeTool(
   name: string,
   args: unknown,
@@ -1445,7 +1472,7 @@ export async function executeTool(
             summary: '超时',
             isError: true
           }
-        return { content: `获取失败：${err?.message ?? String(e)}`, summary: '失败', isError: true }
+        return { content: `获取失败：${err?.message ?? String(e)}`, summary: errorSummary(e), isError: true }
       } finally {
         clearTimeout(timer)
       }
@@ -1786,6 +1813,6 @@ export async function executeTool(
     return { content: `未知工具：${name}`, summary: '未知工具', isError: true }
   } catch (e) {
     const msg = (e as Error)?.message ?? String(e)
-    return { content: `工具执行失败：${msg}`, summary: '失败', isError: true }
+    return { content: `工具执行失败：${msg}`, summary: errorSummary(e), isError: true }
   }
 }
