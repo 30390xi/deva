@@ -3927,15 +3927,16 @@ function ConvMessage({
     )
   // 思考 / 工具调用等过程收进「工作过程」折叠条，名片等固定块与回复正文留在外面（见 splitProcess）；
   // 交付卡在回合结束后排在最后（见 DeliveryCards）。
-  // 进行中同样默认收起，收起时折叠条下露出当前步骤（并行执行的一并列出，最多 5 行，见 currentSteps）。
+  // 进行中同样默认收起，收起时折叠条下露出当前步骤（并行执行的一并列出，最多 5 行，见 currentSteps）；
+  // 最近一步之后已在输出正文或出了卡片时不露。
   // 当前步骤正是流式输出中的思考：折叠条标题直接写「思考中」，下面只露实时小窗，不再重复一行「思考中」
   // 节点（点折叠条展开整条时间轴即可看全文）。
   const split = splitProcess(msg.blocks, active)
-  const current = split && active ? currentSteps(split.process) : []
+  const current = split && active ? currentSteps(msg.blocks) : []
   const step = current.length === 1 ? current[0] : undefined
   const liveThinking = step?.kind === 'thinking' && step === liveBlock ? step : undefined
   const preview =
-    split && active ? (
+    current.length > 0 ? (
       liveThinking ? (
         liveThinking.text.trim() && <LiveThinkingWindow text={liveThinking.text} />
       ) : (

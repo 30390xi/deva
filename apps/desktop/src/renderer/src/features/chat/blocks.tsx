@@ -1511,17 +1511,22 @@ export function splitProcess(
 }
 
 /**
- * 进行中折叠条下露出的「当前步骤」：所有还在执行的工具调用 / 子智能体（并行的一并列出）；都执行完、
- * 模型在想下一步时，保留最近的一步（含思考中），免得这块在一行和零行之间来回闪。
+ * 进行中折叠条下露出的「当前步骤」（blocks 为整轮块序列）：所有还在执行的工具调用 / 子智能体（并行的一并
+ * 列出）；都执行完、模型在想下一步时，保留最近的一步（含思考中），免得这块在一行和零行之间来回闪。
+ * 最近一步之后已写出正文或出现卡片（说明、回复、待批准的计划等）时不再保留：正在输出的内容本身就是进度，
+ * 留着的那一步（如「已思考」）已经过时。
  * 后台运行的子智能体不算：它不是本轮在等的事，常常比回合活得长，由输入框上方的后台任务胶囊展示。
  */
-export function currentSteps(process: ChatBlock[]): ChatBlock[] {
-  const steps = process.filter(isTimelineStep)
+export function currentSteps(blocks: ChatBlock[]): ChatBlock[] {
+  const steps = blocks.filter(isProcess)
   const running = steps.filter(
     (b) => (b.kind === 'tool' && b.status === 'running') || (b.kind === 'subagent' && b.status === 'running' && !b.background)
   )
   if (running.length > 0) return running
-  return steps.length > 0 ? [steps[steps.length - 1]] : []
+  const last = steps[steps.length - 1]
+  if (!last) return []
+  const after = blocks.slice(blocks.indexOf(last) + 1)
+  return after.some((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim())) ? [] : [last]
 }
 
 /** 过程里只有一段思考（没有工具调用、说明等别的步骤）时返回思考正文，否则 null。 */
