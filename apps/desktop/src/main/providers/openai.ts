@@ -13,6 +13,7 @@ import {
   type StreamEvent
 } from './types'
 import type { EffortRequest } from '../../shared/effort'
+import { isEn } from '../locale'
 
 /**
  * OpenAI Chat Completions 风味适配器（兼容 DeepSeek / Moonshot / 智谱 / Qwen / Ollama 等）。
@@ -255,7 +256,11 @@ export async function* streamOpenAI(
       // 「自然结束 + 零正文」收场，用户只看到一句语焉不详的空回合提示。必须原样上报。
       const inband = chunk.error as { message?: string; code?: string; type?: string } | undefined
       if (inband && !Array.isArray(chunk.choices)) {
-        const message = inband.message ?? inband.code ?? inband.type ?? '服务端返回了未说明的错误'
+        const message =
+          inband.message ??
+          inband.code ??
+          inband.type ??
+          (isEn() ? 'The server returned an unspecified error' : '服务端返回了未说明的错误')
         yield { type: 'error', error: { kind: 'server', retryable: false, message } }
         yield { type: 'done', stopReason: 'error' }
         return
@@ -327,7 +332,13 @@ export async function* streamOpenAI(
         if (choice.finish_reason === 'network_error') {
           yield {
             type: 'error',
-            error: { kind: 'server', retryable: true, message: '服务端推理异常（finish_reason: network_error）' }
+            error: {
+              kind: 'server',
+              retryable: true,
+              message: isEn()
+                ? 'The model failed during inference (finish_reason: network_error)'
+                : '服务端推理异常（finish_reason: network_error）'
+            }
           }
           yield { type: 'done', stopReason: 'error' }
           return

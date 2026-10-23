@@ -11,6 +11,7 @@ import {
   type StopReason,
   type StreamEvent
 } from './types'
+import { isEn } from '../locale'
 
 /**
  * OpenAI Responses API 适配器（POST {baseURL}/responses，stream:true）。
@@ -261,7 +262,11 @@ export async function* streamResponses(
         const err = (evt.response as { error?: { message?: string } })?.error
         yield {
           type: 'error',
-          error: { kind: 'server', retryable: false, message: err?.message ?? '生成失败' }
+          error: {
+            kind: 'server',
+            retryable: false,
+            message: err?.message ?? (isEn() ? 'Generation failed' : '生成失败')
+          }
         }
         yield { type: 'done', stopReason: 'error' }
         return
@@ -269,7 +274,7 @@ export async function* streamResponses(
         const message =
           typeof evt.message === 'string'
             ? evt.message
-            : ((evt.error as { message?: string })?.message ?? '流式错误')
+            : ((evt.error as { message?: string })?.message ?? (isEn() ? 'Stream error' : '流式错误'))
         yield { type: 'error', error: { kind: 'server', retryable: false, message } }
         yield { type: 'done', stopReason: 'error' }
         return

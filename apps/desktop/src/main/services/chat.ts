@@ -87,6 +87,7 @@ import {
 } from './chat-store'
 import { trimHistoryImages } from './image-trim'
 import { ATTACH_TEXT_PREFIX, buildAttachmentPart } from './attachments'
+import { isEn } from '../locale'
 import {
   applyFiles,
   buildRestoreNote,
@@ -353,7 +354,7 @@ export type DisplayMessage =
 
 /** StoredNotice → 展示块（错误红框 / 弱化提示）。 */
 function noticeToBlock(nt: StoredNotice): DisplayBlock {
-  if (nt.kind === 'error') return { kind: 'error', message: nt.message ?? '请求失败。' }
+  if (nt.kind === 'error') return { kind: 'error', message: nt.message ?? (isEn() ? 'Request failed.' : '请求失败。') }
   return { kind: 'notice', code: nt.code ?? 'empty' }
 }
 
@@ -2723,7 +2724,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         }
         if (retryableDrop) {
           if (attempt >= MAX_RECONNECT) {
-            errorMessage = `连接多次中断，已重试 ${MAX_RECONNECT} 次仍失败，已停止。${lastDropReason ? `最后一次错误：${lastDropReason}` : ''}`
+            errorMessage = isEn()
+              ? `The connection kept dropping and ${MAX_RECONNECT} retries failed, so the reply was stopped.${lastDropReason ? ` Last error: ${lastDropReason}` : ''}`
+              : `连接多次中断，已重试 ${MAX_RECONNECT} 次仍失败，已停止。${lastDropReason ? `最后一次错误：${lastDropReason}` : ''}`
             if (!isSub)
               emit(turnId, sessionId, {
                 type: 'error',
@@ -3183,7 +3186,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     }
 
     // 达到步数上限（只有定时任务设了有限上限；主轮与子智能体为 Infinity，走不到这里）。
-    const stepLimit = `已达到单轮最大工具步数（${maxSteps}），已停止。`
+    const stepLimit = isEn()
+      ? `Reached the maximum number of tool steps per turn (${maxSteps}), so the reply was stopped.`
+      : `已达到单轮最大工具步数（${maxSteps}），已停止。`
     emit(turnId, sessionId, { type: 'error', kind: 'server', message: stepLimit })
     return { text: finalText, stopReason: 'end_turn' }
   }
@@ -3558,7 +3563,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       return {
         stopReason: 'error',
         text: '',
-        errorMessage: '未配置可用的默认模型，无法执行定时任务（请在设置中选定默认模型）。'
+        errorMessage: isEn()
+          ? 'No default model is available, so the scheduled task could not run. Choose a default model in Settings.'
+          : '未配置可用的默认模型，无法执行定时任务（请在设置中选定默认模型）。'
       }
     }
 

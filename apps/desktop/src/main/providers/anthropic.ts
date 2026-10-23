@@ -12,6 +12,7 @@ import {
   type StreamEvent
 } from './types'
 import type { EffortRequest } from '../../shared/effort'
+import { isEn } from '../locale'
 
 /**
  * Anthropic Messages API 适配器。手写 SSE → 归一化 StreamEvent，不引 SDK。
@@ -264,7 +265,11 @@ export async function* streamAnthropic(
         const err = evt.error as { message?: string }
         yield {
           type: 'error',
-          error: { kind: 'server', retryable: true, message: err?.message ?? '流式错误' }
+          error: {
+            kind: 'server',
+            retryable: true,
+            message: err?.message ?? (isEn() ? 'Stream error' : '流式错误')
+          }
         }
         yield { type: 'done', stopReason: 'error' }
         return

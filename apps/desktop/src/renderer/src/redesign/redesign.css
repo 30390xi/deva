@@ -1227,7 +1227,12 @@ body.cf-resizing-y * {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 始终留出滚动条的位置：内容刚超出一屏（展开工作过程、回复写满一屏）时滚动条冒出来，居中的消息列会整体左移
+     半个滚动条宽，收起又移回去，看起来像在抖 */
+  scrollbar-gutter: stable;
   padding: var(--space-5) 0;
+  /* 消息里吸顶元素（如展开的思考标题）的 top：抵掉上内边距，贴住可视区上沿，不留一条透出正文的缝 */
+  --sticky-top: calc(-1 * var(--space-5));
 }
 
 /* ---- 对话轮次索引（右侧导航） ---- */

@@ -610,9 +610,50 @@ textarea {
 .msg__content > .chat__status {
   margin-top: var(--space-3);
 }
-/* 回复还没内容时（思考中）：状态行就占正文的位置，紧跟在角色名下面 */
+/* 回复还没内容时（如等待挂载）：状态行就占正文的位置，紧跟在角色名下面 */
 .msg__content > .chat__status:first-child {
   margin-top: 0;
+}
+/* 请求中（回复还没开始）：角色名下面、正文将出现的位置，三个点依次放大缩小（同原「思考中」小点的主题色） */
+.chat__pending {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+}
+.chat__pending i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.5;
+  transform: scale(0.55);
+  animation: deva-pending 1.2s ease-in-out infinite;
+}
+.chat__pending i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.chat__pending i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes deva-pending {
+  0%,
+  70%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.55);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat__pending i {
+    animation: none;
+    opacity: 0.7;
+    transform: none;
+  }
 }
 .chat__status-time {
   margin-left: auto;
@@ -1332,7 +1373,8 @@ button.tl__line:hover {
   color: var(--fg-subtle);
   transition: transform 0.15s ease;
 }
-.tl__item.is-open > .tl__main > .tl__line .tl__caret {
+.tl__item.is-open > .tl__main > .tl__line .tl__caret,
+.tl__item.is-open > .tl__main > .tl__think-head > .tl__line .tl__caret {
   transform: rotate(90deg);
 }
 .tl__body {
@@ -1340,6 +1382,58 @@ button.tl__line:hover {
 }
 .tl__think .md {
   font-size: 13px;
+}
+/*
+ * 展开后吸在对话区顶部的标题行：工作过程折叠条（角色名 + 已处理 …）与时间轴上的思考节点（💡 已思考），长内容
+ * 读到中下部也能随手收起。底色同对话区，盖住滚到它下面的正文；外扩一圈（上下 4px 让吸住时文字不贴边，左右盖住
+ * 按钮的悬停底色），内边距抵回，开合时文字不挪位。两者都是 22px 内容 + 上下 4px = 30px 高。
+ * 吸附位置由滚动区给出（--sticky-top，见 .cf-msgs）：sticky 按滚动区内边距内沿吸附，要抵掉它的上内边距。
+ * 同一时间只吸一行（接力）：展开的折叠条里再展开思考时，两者吸在同一位置，思考标题在上层、连同节点图标盖住折叠条
+ * 那行；这段思考读完、标题被顶走，露出下面一直吸着的折叠条。
+ */
+.tl__think-head,
+.msg__process-row {
+  scroll-margin-top: var(--space-2);
+}
+/* 收起思考后滚回视野时，让出吸在顶部的折叠条那一行 */
+.msg__process.is-open .tl__think-head {
+  scroll-margin-top: calc(30px + var(--space-2));
+}
+.msg__process.is-open > .msg__process-row,
+.tl__item.is-open > .tl__main > .tl__think-head {
+  position: sticky;
+  top: var(--sticky-top, 0);
+  background: var(--bg);
+}
+.msg__process.is-open > .msg__process-row {
+  z-index: 1;
+  margin: -4px -6px;
+  padding: 4px 6px;
+}
+.tl__item.is-open > .tl__main > .tl__think-head {
+  z-index: 2;
+}
+/*
+ * 思考标题行向左外扩到节点列（节点 20px + 间距 10px + 6px），节点图标画在这一行里：吸住时带着图标，底色也能
+ * 完整盖住折叠条那行。外扩不分开合，图标位置始终与其他节点对齐；节点列留空占位。
+ */
+.tl__think-head {
+  position: relative;
+  margin: -4px -6px -4px -36px;
+  padding: 4px 6px 4px 36px;
+}
+.tl__think-icon {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 22px;
+  color: var(--fg-subtle);
+}
+.tl__item.is-run > .tl__main > .tl__think-head > .tl__think-icon {
+  color: var(--accent);
 }
 /* 思考的实时小窗：最多 4 行（13px × 1.6），超出时停在最新内容、上沿渐隐 */
 .tl__think-live {
@@ -2746,8 +2840,8 @@ button.tl__line:hover {
   color: var(--fg-muted);
 }
 /*
- * 请求失败：不加框。红色只用在图标和「出错了」这一短行上；报错原文（常是服务商返回的多行英文）用灰色正文，
- * 整段红字在浅色主题下对比度不足（约 3.9:1）且刺眼。
+ * 请求失败：不加框，红色图标 + 红色报错原文一行，图标与文字同色（--danger）。
+ * 报错原文可能是服务商返回的多行英文，保留换行、可选中复制。
  */
 .msg__error {
   display: flex;
@@ -2756,24 +2850,14 @@ button.tl__line:hover {
   margin-top: var(--space-3);
   font-size: 13px;
   line-height: 1.6;
+  color: var(--danger);
 }
 .msg__error > svg {
   flex-shrink: 0;
   margin-top: 3px;
-  color: var(--danger);
 }
-.msg__error-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.msg__error-text {
   min-width: 0;
-}
-.msg__error-title {
-  font-weight: 500;
-  color: var(--danger);
-}
-.msg__error-detail {
-  color: var(--fg-muted);
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
@@ -2817,6 +2901,9 @@ button.tl__line:hover {
   align-items: center;
   gap: 2px 8px;
   min-width: 0;
+  /* 内容区恒为 22px（按 content-box 算）：展开吸顶时外加的上下内边距不改变内容区，角色名与标题开合时不挪位 */
+  box-sizing: content-box;
+  min-height: 22px;
 }
 /* 带角色名时箭头在文字末尾、朝下，展开后朝上（不带名字时是前置的右箭头，展开转 90°） */
 .msg__process.has-lead .msg__process-head {

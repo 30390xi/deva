@@ -128,6 +128,7 @@ import {
   BlockView,
   CompactionNotice,
   DeliveryCards,
+  LiveThinkingWindow,
   ProcessFold,
   StatusIndicator,
   Timeline,
@@ -3224,7 +3225,8 @@ function Conversation({
   // 底部工作状态行。本轮已有「工作过程」折叠条时，常规的「正在做什么 + 计时」已在折叠条里，只剩等待作答 /
   // 重连 / 压缩这些特殊状态；它们放进这条消息的末尾，紧跟步骤与卡片——放在消息列表下面的话，进行中消息底部
   // 撑住的空白（见 ConvMessage）会把它和上面的步骤隔开。还没有折叠条时照常放在列表下方。
-  // 回复还什么都没出（思考中）时也放进这条消息，就在角色名下面、正文将出现的位置；正文一到即被替换。
+  // 回复还什么都没出（请求中）时也放进这条消息，就在角色名下面、正文将出现的位置，显示为三个跳动的点；
+  // 正文或思考一到即被替换。
   const lastMsg = messages[messages.length - 1]
   const folded = streaming && lastMsg?.role === 'assistant' && hasProcess(lastMsg.blocks)
   const blank =
@@ -3233,7 +3235,13 @@ function Conversation({
     lastMsg.blocks.every((b) => b.kind === 'step' || (b.kind === 'text' && !b.text.trim()))
   const statusInMsg = folded || blank
   const statusLine = streaming ? (
-    <StatusIndicator activity={deriveActivity(messages)} status={streamStatus} folded={folded} onStop={onStop} />
+    <StatusIndicator
+      activity={deriveActivity(messages)}
+      status={streamStatus}
+      folded={folded}
+      pending={blank}
+      onStop={onStop}
+    />
   ) : null
 
   // 单条消息渲染（选择态与常态复用；选择态下 active 恒 false，因选择只在非流式时可用）。
@@ -3731,15 +3739,24 @@ function ConvMessage({
   // 思考 / 工具调用等过程收进「工作过程」折叠条，名片等固定块与回复正文留在外面（见 splitProcess）；
   // 交付卡在回合结束后排在最后（见 DeliveryCards）。
   // 进行中同样默认收起，收起时折叠条下露出当前步骤（并行执行的一并列出，最多 5 行，见 currentSteps）。
+  // 当前步骤正是流式输出中的思考：折叠条标题直接写「思考中」，下面只露实时小窗，不再重复一行「思考中」
+  // 节点（点折叠条展开整条时间轴即可看全文）。
   const split = splitProcess(msg.blocks, active)
+  const current = split && active ? currentSteps(split.process) : []
+  const step = current.length === 1 ? current[0] : undefined
+  const liveThinking = step?.kind === 'thinking' && step === liveBlock ? step : undefined
   const preview =
     split && active ? (
-      <Timeline
-        steps={currentSteps(split.process).map((b) => ({ block: b, index: msg.blocks.indexOf(b) }))}
-        liveBlock={liveBlock}
-        compact
-        limit={5}
-      />
+      liveThinking ? (
+        liveThinking.text.trim() && <LiveThinkingWindow text={liveThinking.text} />
+      ) : (
+        <Timeline
+          steps={current.map((b) => ({ block: b, index: msg.blocks.indexOf(b) }))}
+          liveBlock={liveBlock}
+          compact
+          limit={5}
+        />
+      )
     ) : undefined
   // 有工作过程时，角色名与折叠条同一行（「Deva › 已处理 … · N 步」）；没有时单独一行。
   const name = <span className="cf-msg__name">{owner?.name ?? t('cf.assistant')}</span>
@@ -3761,6 +3778,7 @@ function ConvMessage({
                 blocks={split.process}
                 durationMs={msg.durationMs}
                 live={active}
+                thinking={Boolean(liveThinking)}
                 elapsedSec={active ? elapsedSec : undefined}
                 preview={preview}
                 open={processOpen}

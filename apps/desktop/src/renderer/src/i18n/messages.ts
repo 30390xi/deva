@@ -392,9 +392,11 @@ const zhCN: MessageTree = {
     },
     process: {
       // 折叠条标题：进行中「处理中 · 7 步」，结束后「已处理 1 分 12 秒 · 7 步」；没记录耗时的旧对话回落为「已执行 7 步」。
+      // 结束后过程里只有一段思考时为「已思考 12 秒」。
       live: '处理中',
       more: '还有 {n} 个在执行',
       worked: '已处理 {d}',
+      thought: '已思考 {d}',
       count: '{n} 步',
       steps: '已执行 {n} 步',
       h: '{n} 小时',
@@ -410,6 +412,7 @@ const zhCN: MessageTree = {
     },
     work: {
       thinking: '思考中',
+      requesting: '等待回复',
       responding: '生成回答中',
       compacting: '正在压缩较早的对话',
       usingTool: '正在调用工具',
@@ -1480,6 +1483,7 @@ const en: MessageTree = {
       live: 'Working',
       more: '{n} more running',
       worked: 'Worked for {d}',
+      thought: 'Thought for {d}',
       count: '{n} steps',
       steps: '{n} steps',
       h: '{n}h',
@@ -1495,6 +1499,7 @@ const en: MessageTree = {
     },
     work: {
       thinking: 'Thinking',
+      requesting: 'Waiting for response',
       responding: 'Responding',
       compacting: 'Compacting earlier conversation',
       usingTool: 'Using tool',

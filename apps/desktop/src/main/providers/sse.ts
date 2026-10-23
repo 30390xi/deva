@@ -1,3 +1,5 @@
+import { isEn } from '../locale'
+
 /**
  * 流空闲判定阈值：连续这么久收不到任何字节（含 SSE 心跳/注释帧），
  * 即判定连接已"僵死"（半开 TCP：socket 未报错但也不再吐数据）。
@@ -9,7 +11,8 @@ export const STREAM_IDLE_MS = 60_000
 /** 空闲超时专用错误：名字不是 'AbortError'，故被适配器归一化为 retryable 网络错误。 */
 export class StreamIdleError extends Error {
   constructor(ms: number) {
-    super(`连接空闲超过 ${Math.round(ms / 1000)}s，判定为中断`)
+    const s = Math.round(ms / 1000)
+    super(isEn() ? `No data for over ${s}s; treating the connection as dropped` : `连接空闲超过 ${s}s，判定为中断`)
     this.name = 'StreamIdleError'
   }
 }

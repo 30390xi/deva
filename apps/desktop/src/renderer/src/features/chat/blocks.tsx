@@ -148,16 +148,19 @@ export function deriveActivity(messages: ChatMessage[]): Activity {
  * "自动重连"是主进程 reconnecting 事件驱动的真实信号，非渲染层猜测。
  * folded：本轮已有「工作过程」折叠条——当前步骤露在它下面、计时在它标题末尾，活跃形态不再显示；
  * 等待、重连、压缩这些特殊状态照常显示。
+ * pending：回复还什么都没出（请求刚发出、在等第一个字）——活跃形态换成三个跳动的点。
  */
 export function StatusIndicator({
   activity,
   status,
   folded = false,
+  pending = false,
   onStop
 }: {
   activity: Activity
   status: StreamStatus
   folded?: boolean
+  pending?: boolean
   onStop: () => void
 }): React.JSX.Element | null {
   const { t } = useI18n()
@@ -244,6 +247,17 @@ export function StatusIndicator({
 
   if (folded) return null
 
+  // 请求中：此时并不知道模型会不会思考，不写「思考中」，只在角色名下面、正文将出现的位置放三个依次
+  // 放大缩小的点；第一个字（或思考）一到即被替换。
+  if (pending)
+    return (
+      <div className="chat__pending" role="status" aria-label={t('chat.work.requesting')}>
+        <i />
+        <i />
+        <i />
+      </div>
+    )
+
   return (
     <div className="chat__status" role="status" aria-live="polite">
       <span className="chat__status-dot" />
@@ -265,9 +279,9 @@ function formatElapsed(sec: number): string {
 
 /**
  * 思考的实时小窗：最多几行高（见 .tl__think-live），超出时始终停在最新内容、上沿渐隐。
- * 高度封顶，思考再长也不会把页面越撑越高。
+ * 高度封顶，思考再长也不会把页面越撑越高。（进行中折叠条下直接露出它，见对话区，故导出。）
  */
-function LiveThinkingWindow({ text }: { text: string }): React.JSX.Element {
+export function LiveThinkingWindow({ text }: { text: string }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [overflow, setOverflow] = useState(false)
   useLayoutEffect(() => {
@@ -284,9 +298,27 @@ function LiveThinkingWindow({ text }: { text: string }): React.JSX.Element {
 }
 
 /**
+ * 手动收起后把开合按钮所在的行滚回可视区：展开的内容很长、读到下面时，吸顶的标题早已离开原位，收起后内容
+ * 一下变短，不拉回来就跳到别处、找不到读到哪了。返回挂在该行上的 ref，以及点开合按钮时先调用的标记函数。
+ * 只管用户手动收起；自动收起（如思考完成）不调用标记，不动滚动位置（贴底跟随照常）。
+ */
+function useAnchorOnClose<T extends HTMLElement>(open: boolean): [React.RefObject<T>, () => void] {
+  const ref = useRef<T>(null)
+  const pending = useRef(false)
+  useLayoutEffect(() => {
+    if (open || !pending.current) return
+    pending.current = false
+    ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [open])
+  return [ref, () => (pending.current = open)]
+}
+
+/**
  * 时间轴上的思考节点（可展开）。对齐 Codex/DeepSeek 的推理折叠：思考中默认展开、标签扫光，
  * 思考完成后自动收起（用户仍可手动点开）。正文按弱化配色渲染 Markdown（muted）。
  * autoOpen=false（进行中折叠条下的当前步骤）：思考中不展开全文，改为实时滚动的小窗，高度封顶。
+ * 展开后标题行吸在对话区顶部（见 .tl__think-head），长思考读到中下部也能随手收起；这是唯一的收起入口。
+ * 节点图标画在标题行里（节点列留空占位），吸顶时随这一行一起走。
  */
 function TimelineThinking({
   text,
@@ -306,27 +338,30 @@ function TimelineThinking({
     if (done && !wasDone.current) setOpen(false)
     wasDone.current = done
   }, [done])
+  const [headRef, markToggle] = useAnchorOnClose<HTMLDivElement>(open)
+  const toggle = (): void => {
+    markToggle()
+    setOpen(!open)
+  }
   return (
     <li className={`tl__item${done ? '' : ' is-run'}${open ? ' is-open' : ''}`}>
-      <span className="tl__node">
-        <Lightbulb size={14} />
-      </span>
+      <span className="tl__node" />
       <div className="tl__main">
-        <button
-          type="button"
-          className="tl__line"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span className="tl__text">
-            {done ? (
-              <span className="tl__verb">{t('chat.thought')}</span>
-            ) : (
-              <span className="tl__shimmer">{t('chat.thinking')}</span>
-            )}
+        <div ref={headRef} className="tl__think-head">
+          <span className="tl__think-icon">
+            <Lightbulb size={14} />
           </span>
-          <ChevronRight size={12} className="tl__caret" />
-        </button>
+          <button type="button" className="tl__line" aria-expanded={open} onClick={toggle}>
+            <span className="tl__text">
+              {done ? (
+                <span className="tl__verb">{t('chat.thought')}</span>
+              ) : (
+                <span className="tl__shimmer">{t('chat.thinking')}</span>
+              )}
+            </span>
+            <ChevronRight size={12} className="tl__caret" />
+          </button>
+        </div>
         {open ? (
           <div className="tl__body tl__think">
             <Markdown text={text} muted />
@@ -449,14 +484,11 @@ export function BlockView({
     )
   }
 
-  // error：红色只给图标和「出错了」标题；报错原文常是服务商返回的多行英文，用灰色正文显示
+  // error：红色图标 + 红色报错原文一行（文案由主进程按界面语言生成；原文为空时兜底「出错了」）
   return (
     <div className="msg__error">
       <AlertTriangle size={14} />
-      <div className="msg__error-body">
-        <span className="msg__error-title">{t('chat.error')}</span>
-        {block.message && <span className="msg__error-detail">{block.message}</span>}
-      </div>
+      <span className="msg__error-text">{block.message || t('chat.error')}</span>
     </div>
   )
 }
@@ -1492,6 +1524,13 @@ export function currentSteps(process: ChatBlock[]): ChatBlock[] {
   return steps.length > 0 ? [steps[steps.length - 1]] : []
 }
 
+/** 过程里只有一段思考（没有工具调用、说明等别的步骤）时返回思考正文，否则 null。 */
+function thoughtOnly(blocks: ChatBlock[]): string | null {
+  const steps = blocks.filter((b) => b.kind !== 'step' && (b.kind !== 'text' || b.text.trim()))
+  const only = steps.length === 1 ? steps[0] : undefined
+  return only?.kind === 'thinking' ? only.text : null
+}
+
 /** 秒数 →「1 分 12 秒」/「1m 12s」：高位为 0 的单位省略，秒恒显示。 */
 function formatDuration(sec: number, t: (key: string) => string): string {
   const h = Math.floor(sec / 3600)
@@ -1505,11 +1544,18 @@ function formatDuration(sec: number, t: (key: string) => string): string {
 /**
  * 「工作过程」折叠条：进行中与结束后都默认收起，一行灰字。
  * 进行中：标题「处理中 · 7 步 · 12 秒」（计时在末尾，底部状态行此时不再显示），收起时下方露出当前步骤
- * （preview，由调用方给出）。
+ * （preview，由调用方给出）。thinking：当前步骤正是流式输出中的思考——标题以扫光的「思考中」开头，
+ * 调用方此时只露思考的实时小窗，不再重复一行「思考中」节点。
  * 结束后：标题为本轮耗时与步数（「已处理 1 分 12 秒 · 7 步」，工具调用与子智能体各算一步）；没记录耗时的
- * 旧对话回落为「已执行 7 步」，只有思考时为「已思考」。失败不进标题——过程中的失败多是参数不对、
- * 随即重试，展开后节点已标红；真正的错误由外面的错误块呈现。
+ * 旧对话回落为「已执行 7 步」。失败不进标题——过程中的失败多是参数不对、随即重试，展开后节点已标红；
+ * 真正的错误由外面的错误块呈现。
  * 展开后按原顺序画出整条时间轴（children 由调用方给出，复用其块渲染）；展开态由调用方保管，跨过回合结束不变。
+ * 展开时这一行吸在对话区顶部（里面展开的思考标题读到时盖住它，见 .msg__process-row），步骤再多也能随手收起；
+ * 手动收起后把这一行滚回可视区。
+ * 过程里只有一段思考（进行中与结束后都算）：折叠条就是这段思考——展开后直接是思考正文（不用 children），不再
+ * 套一层时间轴节点：否则进行中标题写着「思考中」，展开后下面又一行「思考中」节点，收起节点时两处重复。结束后
+ * 标题为「已思考 12 秒」（没记录耗时为「已思考」）。进行中随后出现工具调用时才换成时间轴，那时思考已结束、
+ * 节点本就收起，看着与自动收起无异。
  * lead：排在折叠条同一行最前面的内容（对话区传角色名，显示为「Deva  已处理 … · N 步 ⌄」）。带 lead 时
  * 箭头挪到文字末尾、朝下（展开后朝上）：夹在名字和文字之间读起来像层级路径，也看不出是展开按钮。
  */
@@ -1517,6 +1563,7 @@ export function ProcessFold({
   blocks,
   durationMs,
   live = false,
+  thinking = false,
   elapsedSec,
   preview,
   open,
@@ -1527,6 +1574,8 @@ export function ProcessFold({
   blocks: ChatBlock[]
   durationMs?: number
   live?: boolean
+  /** 进行中且当前步骤是流式输出中的思考。 */
+  thinking?: boolean
   /** 进行中已用秒数，显示在标题末尾。 */
   elapsedSec?: number
   preview?: React.ReactNode
@@ -1536,23 +1585,41 @@ export function ProcessFold({
   children: React.ReactNode
 }): React.JSX.Element {
   const { t } = useI18n()
+  const thought = thoughtOnly(blocks)
+  const [rowRef, markToggle] = useAnchorOnClose<HTMLDivElement>(open)
+  const toggle = (): void => {
+    markToggle()
+    onToggle()
+  }
   // 步数：工具调用、子智能体、提问、计划各算一步（它们在模型那边都是一次工具调用）。
   const calls = blocks.filter(
     (b) => b.kind === 'tool' || b.kind === 'subagent' || b.kind === 'ask' || b.kind === 'plan'
   ).length
   const parts: string[] = []
-  if (live) parts.push(t('chat.process.live'))
-  else if (durationMs !== undefined)
+  if (!live && durationMs !== undefined)
     parts.push(
-      t('chat.process.worked').replace('{d}', formatDuration(Math.max(1, Math.round(durationMs / 1000)), t))
+      t(thought !== null ? 'chat.process.thought' : 'chat.process.worked').replace(
+        '{d}',
+        formatDuration(Math.max(1, Math.round(durationMs / 1000)), t)
+      )
     )
   if (calls > 0)
     parts.push(
       t(live || durationMs !== undefined ? 'chat.process.count' : 'chat.process.steps').replace('{n}', String(calls))
     )
-  const title = parts.length > 0 ? parts.join(' · ') : t('chat.thought')
+  // 进行中以当前活动开头：思考中（扫光）或处理中；结束后没有耗时与步数的旧对话回落为「已思考」。
+  const title = live ? (
+    <>
+      {thinking ? <span className="tl__shimmer">{t('chat.thinking')}</span> : t('chat.process.live')}
+      {parts.length > 0 && ` · ${parts.join(' · ')}`}
+    </>
+  ) : parts.length > 0 ? (
+    parts.join(' · ')
+  ) : (
+    t('chat.thought')
+  )
   const head = (
-    <button type="button" className="msg__process-head" aria-expanded={open} onClick={onToggle}>
+    <button type="button" className="msg__process-head" aria-expanded={open} onClick={toggle}>
       {!lead && <ChevronRight size={13} className="msg__process-caret" />}
       <span>
         {title}
@@ -1564,17 +1631,15 @@ export function ProcessFold({
     </button>
   )
   return (
-    <div className={`msg__process${open ? ' is-open' : ''}${lead ? ' has-lead' : ''}`}>
-      {lead ? (
-        <div className="msg__process-row">
-          {lead}
-          {head}
-        </div>
-      ) : (
-        head
-      )}
+    <div
+      className={`msg__process${open ? ' is-open' : ''}${lead ? ' has-lead' : ''}`}
+    >
+      <div ref={rowRef} className="msg__process-row">
+        {lead}
+        {head}
+      </div>
       {open ? (
-        <div className="msg__process-body">{children}</div>
+        <div className="msg__process-body">{thought !== null ? <Markdown text={thought} muted /> : children}</div>
       ) : (
         preview && <div className="msg__process-preview">{preview}</div>
       )}

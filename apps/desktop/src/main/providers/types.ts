@@ -100,6 +100,7 @@ export type StopReason =
 export { isEffortLevel, type EffortLevel } from '../../shared/effort'
 import type { EffortRequest } from '../../shared/effort'
 import { parseContextLimit } from '../../shared/context'
+import { isEn } from '../locale'
 
 export interface GenerateRequest {
   model: string
@@ -226,7 +227,7 @@ export function* settleBrokenCalls(
 /** 响应体摘要：折叠空白、限长。中转 / 网关常把真正原因（上游额度用尽、内容拦截等）写在这里。 */
 function bodyHint(body: string): string {
   const s = body.replace(/\s+/g, ' ').trim().slice(0, 200)
-  return s ? `：${s}` : ''
+  return s ? `${isEn() ? ': ' : '：'}${s}` : ''
 }
 
 /** 解析 retry-after 头（秒数或 HTTP 日期）→ 毫秒；无效返回 undefined。 */
@@ -257,6 +258,7 @@ function isEffortRejection(status: number, body: string): boolean {
 /**
  * HTTP 状态码 → 归一化错误。retryAfter 为响应头 retry-after 原值（可选）；
  * effortSent = 本次请求带了思考等级参数（见 GenerateRequest.effort）。
+ * message 会直接显示给用户，按界面语言出中 / 英文（见 locale.ts）。
  */
 export function httpError(
   status: number,
@@ -264,21 +266,32 @@ export function httpError(
   retryAfter?: string | null,
   effortSent?: boolean
 ): NormalizedError {
+  const en = isEn()
   // Anthropic 的「输入 + max_tokens 超出窗口」也落在这一类，其报错里写着真实窗口，一并带上。
   if (isOutputLimitRejection(status, body))
     return {
       kind: 'output_limit',
       retryable: false,
-      message: `请求的输出上限超出该模型允许范围（${status}）${bodyHint(body)}`,
+      message: en
+        ? `The requested output limit exceeds what this model allows (${status})${bodyHint(body)}`
+        : `请求的输出上限超出该模型允许范围（${status}）${bodyHint(body)}`,
       limit: parseContextLimit(body)
     }
   if (status === 401 || status === 403)
-    return { kind: 'auth', retryable: false, message: `鉴权失败（${status}）：请检查 API 密钥。` }
+    return {
+      kind: 'auth',
+      retryable: false,
+      message: en
+        ? `Authentication failed (${status}). Check your API key.`
+        : `鉴权失败（${status}）：请检查 API 密钥。`
+    }
   if (status === 429)
     return {
       kind: 'rate_limit',
       retryable: true,
-      message: `触发限流（429），请稍后重试${bodyHint(body)}`,
+      message: en
+        ? `Rate limited (429). Try again later${bodyHint(body)}`
+        : `触发限流（429），请稍后重试${bodyHint(body)}`,
       retryAfterMs: parseRetryAfter(retryAfter)
     }
   // 须在 context_length 之前：后者的正则很宽（token / maximum…），参数被拒的报错常被它误吞。
@@ -286,25 +299,31 @@ export function httpError(
     return {
       kind: 'effort_unsupported',
       retryable: false,
-      message: `该模型不支持所选思考等级（${status}）${bodyHint(body)}`
+      message: en
+        ? `This model doesn't support the selected thinking level (${status})${bodyHint(body)}`
+        : `该模型不支持所选思考等级（${status}）${bodyHint(body)}`
     }
   if (status === 400 && /context|token|length|maximum/i.test(body))
     return {
       kind: 'context_length',
       retryable: false,
-      message: '对话长度已超出该模型的上下文上限，无法继续。请新建对话，或换用上下文更大的模型后重试。',
+      message: en
+        ? 'The conversation is longer than this model’s context window. Start a new chat, or switch to a model with a larger context window and try again.'
+        : '对话长度已超出该模型的上下文上限，无法继续。请新建对话，或换用上下文更大的模型后重试。',
       limit: parseContextLimit(body)
     }
   if (status >= 500)
     return {
       kind: 'server',
       retryable: true,
-      message: `服务端错误（${status}）${bodyHint(body)}`,
+      message: en ? `Server error (${status})${bodyHint(body)}` : `服务端错误（${status}）${bodyHint(body)}`,
       retryAfterMs: parseRetryAfter(retryAfter)
     }
   return {
     kind: 'invalid_request',
     retryable: false,
-    message: `请求失败（${status}）：${body.slice(0, 300)}`
+    message: en
+      ? `Request failed (${status}): ${body.slice(0, 300)}`
+      : `请求失败（${status}）：${body.slice(0, 300)}`
   }
 }
