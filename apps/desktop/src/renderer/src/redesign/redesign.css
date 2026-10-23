@@ -2956,7 +2956,7 @@ body.cf-resizing-y * {
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
-  background: var(--bg-base, #fff);
+  background: var(--bg-elevated);
   color: var(--fg);
   font-size: 12.5px;
   cursor: default;
