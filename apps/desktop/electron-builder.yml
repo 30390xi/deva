@@ -13,8 +13,8 @@ files:
 # 让最终安装包自带运行时，用户双击安装后即可启动，无需任何环境配置
 asar: true
 
-# mac 包做 ad-hoc 签名（免费、无证书），见脚本内说明；其他平台直接跳过
-afterPack: ./scripts/adhoc-sign.cjs
+# mac 包做 ad-hoc 签名（免费、无证书）；Linux 把可执行文件换成补 Wayland 参数的启动脚本。见各脚本内说明
+afterPack: ./scripts/after-pack.cjs
 
 # Windows 便携版 zip 套一层 Deva\ 目录（electron-builder 默认把文件直接放在压缩包根目录），见脚本内说明
 afterAllArtifactBuild: ./scripts/portable-zip.cjs
@@ -68,8 +68,9 @@ linux:
   # 可执行文件名默认取 package.json 的 name（@deva/desktop → @devadesktop），带 @ 与 / 无法用于文件路径，
   # AppImage 打包会直接失败；显式给一个干净的名字。
   executableName: deva
-  # 1024×1024 png，electron-builder 自动生成各尺寸图标
-  icon: build/icon.png
+  # 各尺寸 png 目录（NxN.png，由 build/icon.png 缩放而来）：给单张 1024 的 png 时只会装进 hicolor/1024x1024，
+  # 启动器 / 图标主题常按 48~256 找图标，找不到就显示占位图
+  icon: build/icons
   # 让 .desktop 文件名与 Electron 的 app_id / WM_CLASS 对齐，任务栏才能把窗口归到 Deva 图标下
   # （desktopName 本身在 apps/desktop/package.json 里）
   syncDesktopName: true
