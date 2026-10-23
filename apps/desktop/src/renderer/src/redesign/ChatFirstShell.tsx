@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from 'react'
 import {
   AlarmClock,
   AlertTriangle,
@@ -1969,6 +1978,7 @@ function ThreadRow({
 }): React.JSX.Element {
   const { t } = useI18n()
   const rel = useRelativeTime()
+  const draft = useDraftPreview(session.id)
   // 任务独占会话（sessionId = `task-…`）：行上打一枚静态「⏰ 定时」徽标以区别普通对话。
   // 「有新运行未读」（state.unread）与待你处理（state.attention）都在头像右上角打红点。
   const isTask = session.id.startsWith('task-')
@@ -1998,7 +2008,15 @@ function ThreadRow({
           )}
           <span className="cf-thread__time">{rel(session.updatedAt)}</span>
         </div>
-        <div className="cf-thread__owner">{owner?.name ?? ''}</div>
+        {/* 这个会话里有没发出的内容（且不是正在看的会话）：下行换成红色「[草稿]」+ 内容开头，提醒切回去接着写。 */}
+        {draft && !active ? (
+          <div className="cf-thread__owner">
+            <span className="cf-thread__draft">{t('cf.draftTag')}</span>
+            {draft}
+          </div>
+        ) : (
+          <div className="cf-thread__owner">{owner?.name ?? ''}</div>
+        )}
       </div>
     </button>
   )
@@ -3398,6 +3416,7 @@ function Conversation({
         </div>
       ) : (
         <Composer
+          sessionId={currentSessionId}
           owner={owner}
           streaming={streaming}
           focusRoot={focusRoot}
@@ -3820,7 +3839,40 @@ function slashQueryOf(input: string): string | null {
   return m ? m[1] : null
 }
 
+/**
+ * 各会话未发送的输入（正文 + 待发附件），按会话 id 存在内存里：切走时存下、切回来接着写，也不会把 A 会话
+ * 没写完的内容带到 B。只存非空的；不落盘，重启应用后清空。
+ * 会话列表据此在其他会话行上显示「[草稿] …」（见 useDraftPreview）：只在进出会话时变动，打字不刷新列表。
+ */
+type ComposerDraft = { text: string; pending: Picked[] }
+const composerDrafts = new Map<string, ComposerDraft>()
+const draftListeners = new Set<() => void>()
+
+/** 写入（null = 清除）某会话的草稿，并通知会话列表。 */
+function setComposerDraft(id: string, draft: ComposerDraft | null): void {
+  if (draft) composerDrafts.set(id, draft)
+  else if (!composerDrafts.delete(id)) return
+  for (const notify of draftListeners) notify()
+}
+
+function subscribeDrafts(onChange: () => void): () => void {
+  draftListeners.add(onChange)
+  return () => {
+    draftListeners.delete(onChange)
+  }
+}
+
+/** 某会话草稿的一行摘要：正文（空白归一），只有附件时为附件名；没有草稿为 null。 */
+function useDraftPreview(id: string): string | null {
+  return useSyncExternalStore(subscribeDrafts, () => {
+    const d = composerDrafts.get(id)
+    if (!d) return null
+    return d.text.replace(/\s+/g, ' ').trim() || d.pending.map((p) => p.name).join(' ') || null
+  })
+}
+
 function Composer({
+  sessionId,
   owner,
   streaming,
   focusRoot,
@@ -3833,6 +3885,8 @@ function Composer({
   prefill,
   onPrefillConsumed
 }: {
+  /** 当前会话：输入框里的草稿按它分开保存（见 composerDrafts）。 */
+  sessionId: string
   owner?: Persona
   streaming: boolean
   focusRoot: string | null
@@ -3850,6 +3904,10 @@ function Composer({
   const { skills } = useExtensions()
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<Picked[]>([])
+  const pendingRef = useRef(pending)
+  pendingRef.current = pending
+  const sessionRef = useRef(sessionId)
+  sessionRef.current = sessionId
   // 输入框高度：固定高、不随内容长高，内容多了框内滚动；只能靠顶边手柄拖动调整。
   // 与侧栏同理，存用户意图值、渲染时按窗口高再夹取。
   const viewport = useViewport()
@@ -3999,6 +4057,7 @@ function Composer({
       return
     }
     const prevPending = pending
+    const sid = sessionId
     composer.setText('')
     composer.clearHistory()
     setPending([])
@@ -4006,8 +4065,13 @@ function Composer({
       text,
       atts.map((p) => ({ path: p.path, name: p.name, kind: p.kind as AttachKind }))
     ).then((sent) => {
-      // 未发出（未选模型 / 请求失败，原因已 toast）：把草稿放回——但别覆盖用户在此期间新敲的内容。
+      // 未发出（未选模型 / 请求失败，原因已 toast）：把草稿放回——但别覆盖用户在此期间新敲的内容；
+      // 此间已切到别的会话的，放回原会话的草稿里。
       if (sent) return
+      if (sessionRef.current !== sid) {
+        if (!composerDrafts.has(sid)) setComposerDraft(sid, { text, pending: prevPending })
+        return
+      }
       if (!composer.getText()) composer.setText(text)
       setPending((cur) => (cur.length ? cur : prevPending))
     })
@@ -4078,6 +4142,23 @@ function Composer({
   // 判定依据（技能启停、有无附件）变了而文本没变：重新识别一次开头指令。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => composer.refreshToken(), [skills, noAtts])
+
+  // 草稿按会话分开：进入会话（含挂载）换上它的草稿，没有则清空；离开（切换会话或卸载，如进入选择删除）时
+  // 把当前内容存到它名下。撤销历史一并清掉，免得撤销把别的会话的内容找回来。用 layout effect，切过去时
+  // 不会先闪一下上一个会话的文字。
+  useLayoutEffect(() => {
+    const draft = composerDrafts.get(sessionId)
+    setComposerDraft(sessionId, null)
+    composer.setText(draft?.text ?? '')
+    composer.clearHistory()
+    setPending(draft?.pending ?? [])
+    return () => {
+      const text = composer.getText()
+      const kept = pendingRef.current
+      if (text.trim() || kept.length) setComposerDraft(sessionId, { text, pending: kept })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
 
   return (
     <div className="cf-composer">

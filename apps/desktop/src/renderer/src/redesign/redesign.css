@@ -512,6 +512,11 @@ body.cf-resizing-y * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 会话里有没发出的草稿：下行开头的红色「[草稿]」（同 IM 里的草稿提示），其后是草稿开头 */
+.cf-thread__draft {
+  margin-right: 4px;
+  color: var(--danger);
+}
 
 /* 角色行（与对话行同构：头像 | 名称/专长/标签） */
 .cf-prow {
