@@ -320,6 +320,7 @@ export function ChatFirstShell(): React.JSX.Element {
     newSession,
     selectSession,
     deleteSession,
+    renameSession,
     deleteSessions,
     deleteTurns,
     currentBinding,
@@ -485,6 +486,19 @@ export function ChatFirstShell(): React.JSX.Element {
       if (ok) deleteSession(id)
     })()
   }
+  // 重命名对话：居中输入框，预填当前标题并全选。没改不让提交；清空也可提交（= 恢复自动标题）。
+  const renameThread = (id: string, title: string): void => {
+    void (async () => {
+      const next = await dialog.prompt({
+        title: t('cf.renameChatTitle'),
+        defaultValue: title,
+        placeholder: t('cf.renamePlaceholder'),
+        confirmText: t('cf.renameChat'),
+        validate: (v) => v.replace(/\s+/g, ' ').trim() !== title
+      })
+      if (next !== null) renameSession(id, next)
+    })()
+  }
   // 按「轮」删除当前对话的选中轮次（同步删上下文）：先弹居中破坏性确认，确认后走 store.deleteTurns。
   // 返回是否已删——Conversation 据此退出选择态并清空选择（未确认则保持选择态供继续调整）。
   const deleteTurnsWithConfirm = async (indices: number[]): Promise<boolean> => {
@@ -590,6 +604,7 @@ export function ChatFirstShell(): React.JSX.Element {
               onAddPersona={() => setEditor({ mode: 'create' })}
               onAddPersonaByChat={addPersonaByChat}
               onNewChatFromThread={newChatFromThread}
+              onRenameThread={renameThread}
               onDeleteThread={deleteThread}
               onDeletePersona={deletePersona}
               onReorderPersonas={reorderPersonas}
@@ -747,6 +762,7 @@ function Rail({
   onAddPersona,
   onAddPersonaByChat,
   onNewChatFromThread,
+  onRenameThread,
   onDeleteThread,
   onDeletePersona,
   onReorderPersonas
@@ -764,6 +780,8 @@ function Rail({
   onAddPersona: () => void
   onAddPersonaByChat: () => void
   onNewChatFromThread: (id: string) => void
+  /** 重命名对话（弹框输入新标题）；title 为当前标题。 */
+  onRenameThread: (id: string, title: string) => void
   onDeleteThread: (id: string, title: string) => void
   onDeletePersona: (id: string, name: string) => void
   onReorderPersonas: (ids: string[]) => void
@@ -927,6 +945,11 @@ function Rail({
                     label: t('cf.newChat'),
                     icon: <Plus size={14} />,
                     onClick: () => onNewChatFromThread(menu.id)
+                  },
+                  {
+                    label: t('cf.renameChat'),
+                    icon: <Pencil size={14} />,
+                    onClick: () => onRenameThread(menu.id, menu.title)
                   },
                   {
                     label: t('cf.deleteChat'),

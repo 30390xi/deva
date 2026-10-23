@@ -425,6 +425,8 @@ interface ChatContextValue {
   newSession: (personaId?: string, focusRoot?: string | null, model?: string) => void
   selectSession: (id: string) => void
   deleteSession: (id: string) => void
+  /** 重命名对话（立即落库）；title 为空即恢复自动标题（由首条用户消息派生）。不改列表顺序。 */
+  renameSession: (id: string, title: string) => void
   /**
    * 批量删除对话（删除角色时一并清理其名下历史）。一次性中止各自在跑回合、逐条落盘删除、清绑定
    * 覆盖层，最后只刷新一次列表；若当前会话在其中，则切到最近一条或起新会话。空数组为无操作。
@@ -1779,6 +1781,19 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       })()
     }
 
+    // 重命名：非空的新名字先就地显示（免得旧标题闪一下），再以主进程落盘后回传的最终标题为准
+    // （空 → 恢复的自动标题）。只改这一项，不重新拉列表、不重排。
+    const renameSession = (id: string, title: string): void => {
+      const setTitle = (next: string): void =>
+        setSessions((list) => list.map((s) => (s.id === id ? { ...s, title: next } : s)))
+      const typed = title.replace(/\s+/g, ' ').trim()
+      if (typed) setTitle(typed)
+      void (async () => {
+        const r = await window.deva.chat.renameSession({ sessionId: id, title })
+        if (r) setTitle(r.title)
+      })()
+    }
+
     // 批量删除（删角色时清其名下全部对话）：中止各自在跑回合 → 逐条落盘删除 → 清绑定覆盖层 →
     // 只刷新一次列表；当前会话若在删除集内，切到最近一条或起新会话。与单条 deleteSession 同语义，
     // 但合并刷新、避免 N 条并发各自 listSessions/切换互相打架。
@@ -1975,6 +1990,7 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       newSession,
       selectSession,
       deleteSession,
+      renameSession,
       deleteSessions,
       deleteTurns,
       rewindApply,

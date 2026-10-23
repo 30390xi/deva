@@ -2,7 +2,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from 'react'
@@ -140,6 +142,9 @@ function PromptView({
   const { opts } = req
   const [value, setValue] = useState(opts.defaultValue ?? '')
   const valid = opts.validate ? opts.validate(value) : value.trim().length > 0
+  // 打开时全选预填值（重命名多是整段替换）；只在打开时选一次，切走再回来不打断正在改的内容。
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => inputRef.current?.select(), [])
   return (
     <Modal open onClose={() => onDone(null)} labelledBy={opts.title ? TITLE_ID : undefined}>
       {opts.title && (
@@ -151,13 +156,15 @@ function PromptView({
       <div className="modal__field">
         {opts.label && <label className="modal__label">{opts.label}</label>}
         <input
+          ref={inputRef}
           className="input"
           autoFocus
           placeholder={opts.placeholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && valid) onDone(value.trim())
+            // 输入法组字中的 Enter 是在选候选词，不算提交。
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && valid) onDone(value.trim())
           }}
         />
       </div>

@@ -213,6 +213,15 @@ interface ChatSetFocusRequest {
   focusRoot: string | null
 }
 
+/** 重命名对话（立即落库）；title 为空即恢复自动标题。见 chat:rename-session。 */
+interface ChatRenameSessionRequest {
+  sessionId: string
+  title: string
+}
+
+/** 用户自定的对话标题上限（列表里单行省略显示，再长也看不全）。 */
+const TITLE_MAX = 100
+
 /** 角色名片草稿：propose_agent 原始参数归一化后的形状（编辑器/名片消费）。 */
 export interface AgentDraft {
   name: string
@@ -3863,6 +3872,27 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     }
     return { ok: true }
   })
+
+  // 重命名对话：写入标题并落盘（索引随之刷新），回传最终标题。清空即恢复自动标题——同首发时的派生规则，
+  // 取首条用户消息（展示用原文，不含随消息附带的提醒）。会话对象全局缓存为同一份，回合进行中改名也不会被
+  // 这一轮后续落盘冲掉；自动派生只在标题为空时写，不会覆盖用户起的名字。不改 updatedAt（改名不算新活动，
+  // 列表顺序不变）。尚未建档的惰性会话查不到 → null。
+  ipcMain.handle(
+    'chat:rename-session',
+    (_e, payload: ChatRenameSessionRequest): { title: string } | null => {
+      const session = getSession(payload.sessionId)
+      if (!session) return null
+      let title = String(payload.title ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX)
+      if (!title) {
+        const first = displayOf(session).find((m) => m.role === 'user' && !m.notify)
+        if (first?.role === 'user')
+          title = deriveTitle(first.text) || deriveTitle(first.attachments.map((a) => a.name).join(' '))
+      }
+      session.title = title
+      saveProject(payload.sessionId)
+      return { title }
+    }
+  )
 
   // 左侧会话列表：一次列全部（对话无项目/分桶概念）。IPC 仍收 workspaceRoot 以兼容渲染层调用签名，忽略即可。
   ipcMain.handle(

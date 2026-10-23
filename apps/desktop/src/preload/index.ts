@@ -93,6 +93,12 @@ export interface ChatSetFocusRequest {
   focusRoot: string | null
 }
 
+export interface ChatRenameSessionRequest {
+  sessionId: string
+  /** 新标题；空串 = 恢复自动标题（由首条用户消息派生）。 */
+  title: string
+}
+
 /** 附件类型（与 services/attachments.ts 对齐）。 */
 export type AttachmentKind = 'image' | 'document' | 'text' | 'unsupported'
 
@@ -950,6 +956,9 @@ const api = {
     /** 挂载 / 卸载本对话的聚焦工作区并立即落库（不等下一次发送）。 */
     setFocus: (req: ChatSetFocusRequest): Promise<{ ok: true }> =>
       ipcRenderer.invoke('chat:set-focus', req),
+    /** 重命名对话并立即落库，回传最终标题（清空即恢复自动标题）；尚未建档的会话回 null。 */
+    renameSession: (req: ChatRenameSessionRequest): Promise<{ title: string } | null> =>
+      ipcRenderer.invoke('chat:rename-session', req),
     abort: (turnId: string): Promise<{ ok: true }> => ipcRenderer.invoke('chat:abort', turnId),
     /** 停止一个后台运行的子智能体（toolUseId = 其 Task 卡 id）；已结束 / 不存在回 ok:false。 */
     stopSubagent: (sessionId: string, toolUseId: string): Promise<{ ok: boolean }> =>
