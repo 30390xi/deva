@@ -272,6 +272,11 @@ if (!app.requestSingleInstanceLock()) {
   registerToastIdentity('dev.sqfcy.deva')
   // Linux AppImage：把 desktop 入口与图标写到用户目录，启动器里才找得到 Deva（后台进行，不阻塞启动）
   void integrateAppImage()
+  // Linux X11：窗口的 WM_CLASS 取自应用名（默认是 package.json 的 @deva/desktop），与 deva.desktop 的
+  // StartupWMClass=deva 对不上，任务栏就归不到 Deva 图标下（Wayland 的 app_id 取 desktopName，不受影响）。
+  // 必须在 ready 之后改：应用名同时决定 userData 目录与钥匙环里加密密钥的条目名（application=@deva/desktop），
+  // ready 前改会换目录、找不到原密钥，已存的 API 密钥就解不开了；ready 后两者都已定下，只影响之后建的窗口。
+  if (process.platform === 'linux') app.setName('deva')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
