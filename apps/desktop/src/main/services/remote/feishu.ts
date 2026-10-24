@@ -8,10 +8,8 @@ import type {
   NoticeView,
   PromptView,
   RemoteAdapter,
-  ToolBlock,
   TurnPage
 } from './types'
-import { toolSummary } from './types'
 
 /**
  * 飞书适配器：自建应用 + 事件「长连接」模式（WebSocket，无需公网 IP / 回调地址）。
@@ -35,6 +33,7 @@ type Card = Record<string, unknown>
 interface RawCardEvent {
   operator?: { open_id?: string }
   context?: { open_chat_id?: string; open_message_id?: string }
+  open_message_id?: string
   open_chat_id?: string
   action?: { value?: unknown; form_value?: Record<string, unknown> }
 }
@@ -46,7 +45,7 @@ export class FeishuAdapter implements RemoteAdapter {
   readonly platform = 'feishu' as const
   // 同一条消息原地更新的频率上限约 5 QPS；1s 一次留足余量，也免得手机端刷屏抖动。
   readonly minUpdateMs = 1000
-  // 卡片 JSON 上限 30KB，中文按 UTF-8 每字 3 字节计，正文留 6000 字，其余给工具列表与结构。
+  // 卡片 JSON 上限 30KB，中文按 UTF-8 每字 3 字节计，正文留 6000 字，其余给卡片结构。
   readonly pageChars = 6000
 
   private client: lark.Client
@@ -141,7 +140,13 @@ export class FeishuAdapter implements RemoteAdapter {
     for (const [k, v] of Object.entries(d.action?.form_value ?? {}))
       if (typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string')))
         form[k] = v as string | string[]
-    const r = await host.onAction({ chat: { channel: this.id, chatId }, user: { id: openId }, value, form })
+    const r = await host.onAction({
+      chat: { channel: this.id, chatId },
+      user: { id: openId },
+      value,
+      form,
+      messageId: d.context?.open_message_id ?? d.open_message_id
+    })
     return toast(r.ok, r.message)
   }
 
@@ -174,8 +179,16 @@ export class FeishuAdapter implements RemoteAdapter {
     return this.upsert(chat, promptCard(view), handle)
   }
 
-  async sendNotice(chat: ChatAddress, view: NoticeView): Promise<void> {
-    await this.upsert(chat, noticeCard(view))
+  sendNotice(chat: ChatAddress, view: NoticeView): Promise<MessageHandle | undefined> {
+    return this.upsert(chat, noticeCard(view))
+  }
+
+  /** 撤回机器人自己发的消息（飞书不允许机器人删用户的消息，所以入站消息不带 messageId）。 */
+  async deleteMessage(_chat: ChatAddress, handle: MessageHandle): Promise<void> {
+    const r = await this.client.im.v1.message.delete({ path: { message_id: handle } }).catch((e) => {
+      throw new Error(`飞书撤回消息失败：${apiError(e)}`)
+    })
+    if (r.code !== 0) throw new Error(`飞书撤回消息失败：${r.code} ${r.msg ?? ''}`)
   }
 
   async openDirect(userId: string, view: NoticeView): Promise<string | undefined> {
@@ -302,28 +315,6 @@ function clip(s: string, n: number): string {
 /** 行内代码里不能出现反引号。 */
 const code = (s: string): string => (s ? ` \`${s.replace(/`/g, "'")}\`` : '')
 
-function toolLine(b: ToolBlock): string {
-  const icon = b.status === 'running' ? '⏳' : b.status === 'ok' ? '✅' : '❌'
-  if (b.kind === 'subagent') {
-    const desc = b.desc ? ` ${b.desc}` : ''
-    return `${icon} 子助手「${b.agent || '通用'}」${desc} ${grey(`· ${b.steps} 步`)}`
-  }
-  const err = b.status === 'error' && b.summary ? ` ${grey(`— ${b.summary.slice(0, 120)}`)}` : ''
-  return `${icon} **${b.name}**${code(b.brief)}${err}`
-}
-
-/** 连续的工具块：只露一行摘要，明细默认折叠。 */
-function toolElements(run: ToolBlock[]): Card[] {
-  return [
-    {
-      tag: 'collapsible_panel',
-      expanded: false,
-      header: { title: { tag: 'markdown', content: grey(toolSummary(run)) } },
-      elements: [md(run.map(toolLine).join('\n'))]
-    }
-  ]
-}
-
 const STATUS: Record<TurnPage['status'], { text: string; template: Template }> = {
   running: { text: '⏳ 进行中…', template: 'blue' },
   waiting: { text: '⏸ 等待你的决定（见下方卡片）', template: 'orange' },
@@ -335,34 +326,23 @@ const STATUS: Record<TurnPage['status'], { text: string; template: Template }> =
 
 function turnCard(p: TurnPage): Card {
   const els: Card[] = []
-  let run: ToolBlock[] = []
-  const flushRun = (): void => {
-    if (run.length) els.push(...toolElements(run))
-    run = []
-  }
   for (const b of p.blocks) {
-    if (b.kind === 'tool' || b.kind === 'subagent') {
-      run.push(b)
-      continue
-    }
-    flushRun()
     if (b.kind === 'text') {
       if (b.text.trim()) els.push(md(b.text))
     } else if (b.kind === 'notice') els.push(md(grey(b.text)))
     else els.push(md(`<font color='red'>⚠ ${b.text.slice(0, 600)}</font>`))
   }
-  flushRun()
 
   const st = STATUS[p.status]
   const subtitle = p.index > 0 ? `${p.sessionTitle}（续 ${p.index + 1}）` : p.sessionTitle
   if (!p.last) return card(els.length ? els : [md(' ')], { title: p.personaName, subtitle, template: 'wathet' })
 
   const final = p.status === 'done' || p.status === 'aborted' || p.status === 'error'
-  if (!els.length) els.push(md(grey(final ? '（没有内容）' : '正在思考…')))
-  const status = [p.statusText && !final ? p.statusText : st.text, final ? `用时 ${p.elapsedSec}s` : '', final ? p.statusText : '']
-    .filter(Boolean)
-    .join(' · ')
-  els.push({ tag: 'hr' })
+  if (!els.length && final) els.push(md(grey('（没有内容）')))
+  // 还没有正文时只留状态行（「进行中」或正在做什么），不另写「正在思考」。
+  const live = p.statusText && !final ? `${p.status === 'running' ? '⏳ ' : ''}${p.statusText}` : st.text
+  const status = [live, final ? `用时 ${p.elapsedSec}s` : '', final ? p.statusText : ''].filter(Boolean).join(' · ')
+  if (els.length) els.push({ tag: 'hr' })
   els.push(md(grey(status)))
   if (!final) els.push(buttonRow([button('停止', { k: 'stop', turn: p.turnId }, 'danger')]))
   return card(els, { title: p.personaName, subtitle, template: st.template })

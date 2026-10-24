@@ -35,6 +35,8 @@ export interface InboundMessage {
   /** 纯文本（适配器已去掉 @ 提及等平台标记）；非文本消息为空串 + kind 标明。 */
   text: string
   kind: 'text' | 'unsupported'
+  /** 这条消息本身的句柄（指令消息用完后由 hub 删掉）；平台不允许机器人删用户消息时留空。 */
+  messageId?: MessageHandle
 }
 
 /**
@@ -45,6 +47,8 @@ export interface InboundAction {
   chat: ChatAddress
   user: RemoteUser
   value: ActionValue
+  /** 按钮所在的那条消息。 */
+  messageId?: MessageHandle
   /** 表单字段（问答卡提交时）：字段名 → 文本或多选数组。 */
   form?: Record<string, string | string[]>
 }
@@ -54,6 +58,8 @@ export type ActionValue =
   | { k: 'plan'; key: string; d: 'approve' | 'keep' | 'ignore' }
   | { k: 'mount'; key: string }
   | { k: 'use'; sid: string }
+  /** /new 角色卡上选中某个角色（pid = 角色 id）。 */
+  | { k: 'new'; pid: string }
   /** 名片决议：带 sid + 工具调用 id，处理时从会话历史里取草稿（无状态，重启后按钮照样有效）。 */
   | { k: 'autotask'; sid: string; tool: string; a: 'create' | 'dismiss' }
   | { k: 'agent'; sid: string; tool: string; a: 'accept' | 'reject' }
@@ -67,39 +73,8 @@ export interface ActionResult {
 
 // ───────── 出站视图（hub 产出，适配器渲染）─────────
 
-export type TurnBlock =
-  | { kind: 'text'; text: string }
-  | {
-      kind: 'tool'
-      id: string
-      name: string
-      /** 一句话参数摘要（路径 / 命令 …），已截短。 */
-      brief: string
-      status: 'running' | 'ok' | 'error'
-      summary?: string
-    }
-  | { kind: 'subagent'; id: string; agent: string; desc: string; steps: number; status: 'running' | 'ok' | 'error' }
-  | { kind: 'notice'; text: string }
-  | { kind: 'error'; text: string }
-
-/**
- * 一段连续工具块的一行摘要（飞书 / Telegram 共用）：明细默认折叠，只露这一行。
- * 例：⏳ 调用工具 12 次：读取 5 · 编辑 3 · 子助手 1 · 失败 1
- */
-export function toolSummary(run: ToolBlock[]): string {
-  const counts = new Map<string, number>()
-  for (const b of run) {
-    const n = b.kind === 'tool' ? b.name : '子助手'
-    counts.set(n, (counts.get(n) ?? 0) + 1)
-  }
-  const failed = run.filter((b) => b.status === 'error').length
-  const icon = run.some((b) => b.status === 'running') ? '⏳' : failed ? '⚠️' : '🔧'
-  const parts = [...counts].map(([n, c]) => `${n} ${c}`)
-  if (failed) parts.push(`失败 ${failed}`)
-  return `${icon} 调用工具 ${run.length} 次：${parts.join(' · ')}`
-}
-
-export type ToolBlock = Extract<TurnBlock, { kind: 'tool' | 'subagent' }>
+/** 回合正文块。工具调用不在 IM 上展示，只在状态行提示「正在…」。 */
+export type TurnBlock = { kind: 'text'; text: string } | { kind: 'notice'; text: string } | { kind: 'error'; text: string }
 
 export type TurnStatus = 'running' | 'waiting' | 'retrying' | 'done' | 'aborted' | 'error'
 
@@ -116,7 +91,7 @@ export interface TurnPage {
   last: boolean
   blocks: TurnBlock[]
   status: TurnStatus
-  /** 状态补充（重连进度 / 中断原因 …）。 */
+  /** 状态补充（正在做什么 / 重连进度 / 中断原因 …）。 */
   statusText?: string
   elapsedSec: number
 }
@@ -208,7 +183,9 @@ export interface RemoteAdapter {
   /** 发新消息（返回句柄）或原地更新（给了 handle）。失败抛错，由 hub 记日志。 */
   renderTurn(chat: ChatAddress, page: TurnPage, handle?: MessageHandle): Promise<MessageHandle | undefined>
   renderPrompt(chat: ChatAddress, view: PromptView, handle?: MessageHandle): Promise<MessageHandle | undefined>
-  sendNotice(chat: ChatAddress, view: NoticeView): Promise<void>
+  sendNotice(chat: ChatAddress, view: NoticeView): Promise<MessageHandle | undefined>
+  /** 删除一条消息（指令与回执用完即删）。失败抛错，由 hub 忽略。 */
+  deleteMessage(chat: ChatAddress, handle: MessageHandle): Promise<void>
   /** 按用户 id 主动发起私聊（扫码创建后机器人先打招呼），返回该私聊的 chatId。 */
   openDirect(userId: string, view: NoticeView): Promise<string | undefined>
 }

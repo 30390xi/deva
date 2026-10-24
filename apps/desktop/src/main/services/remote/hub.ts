@@ -40,10 +40,10 @@ import type {
 /**
  * 远程通道中枢（平台无关）：会话总线 ⇄ 各 IM 适配器。
  *
- *  出站：订阅 chat-bus，把每一轮的流事件聚合成「回合视图」（正文 / 工具 / 子助手 / 状态），按平台限频
+ *  出站：订阅 chat-bus，把每一轮的流事件聚合成「回合视图」（正文 / 状态；工具只化作「正在…」提示），按平台限频
  *        节流、超长分页，推给**绑定了该对话**的 IM 私聊；问答 / 计划审阅 / 挂载请求另发交互卡。
  *        没有任何私聊跟随的对话若停下来等决定，交互卡推到已配对用户的私聊（人走开了也能拍板）。
- *  入站：鉴权（只认已配对用户）→ 指令（/new /list /use /stop …）或普通消息 → chatRuntime.send；
+ *  入站：鉴权（只认已配对用户）→ 指令（/new /list /stop …）或普通消息 → chatRuntime.send；
  *        卡片按钮 / 表单 → chatRuntime.answerAsk / decidePlan / answerMount。
  *
  *  手机端发起的回合与桌面端走同一入口（chatRuntime 即桌面 IPC 处理器背后的那组函数），落盘、检查点、
@@ -323,7 +323,9 @@ interface TurnTrack {
   blocks: TurnBlock[]
   status: TurnStatus
   statusText?: string
-  /** 远程发起的回合：立刻出一张「思考中」卡，让发消息的人知道已收到。桌面发起的有内容才发。 */
+  /** 最近一次工具调用时的块数：之后的正文另起一段；stream_reset 只丢这之后的残缺正文。 */
+  mark: number
+  /** 远程发起的回合：立刻出一张「进行中」卡，让发消息的人知道已收到。桌面发起的有内容才发。 */
   eager: boolean
   posts: Map<string, Post>
   finished: boolean
@@ -342,6 +344,7 @@ function ensureTrack(turnId: string, sessionId: string, eager: boolean): TurnTra
       startedAt: Date.now(),
       blocks: [],
       status: 'running',
+      mark: 0,
       eager,
       posts: new Map(),
       finished: false
@@ -360,41 +363,25 @@ function addPost(t: TurnTrack, chat: ChatAddress): void {
   t.posts.set(k, { chat, handles: [], rendered: [], lastFlush: 0, chain: Promise.resolve() })
 }
 
-const TOOL_LABELS: Record<string, string> = {
-  read_file: '读取',
-  list_dir: '列目录',
-  glob: '查找文件',
-  grep: '搜索',
-  web_fetch: '读取网页',
-  write_file: '写入',
-  edit_file: '编辑',
-  run_command: '运行命令',
-  create_skill: '创建技能',
-  memory_read: '读取记忆',
-  memory_write: '写入记忆',
-  memory_delete: '删除记忆',
-  create_mcp: '配置 MCP',
-  todo_write: '更新待办清单',
-  present_files: '交付文件'
-}
-
-function toolBrief(args: unknown): string {
-  if (!args || typeof args !== 'object') return ''
-  const a = args as Record<string, unknown>
-  const clip = (s: string): string => {
-    const one = s.trim().replace(/\s+/g, ' ')
-    return one.length > 80 ? `${one.slice(0, 80)}…` : one
-  }
-  for (const k of ['command', 'path', 'pattern', 'url', 'query', 'name', 'key']) {
-    const v = a[k]
-    if (typeof v === 'string' && v.trim()) return clip(v)
-  }
-  // present_files：列出交付的文件名
-  if (Array.isArray(a.paths)) {
-    const names = a.paths.filter((p): p is string => typeof p === 'string').map((p) => p.split(/[\\/]/).pop() ?? p)
-    if (names.length) return clip(names.join('、'))
-  }
-  return ''
+/** 工具调用在 IM 上只化作一句「正在…」状态提示（不展示参数与结果）。 */
+const TOOL_HINTS: Record<string, string> = {
+  read_file: '正在读取文件',
+  list_dir: '正在查看目录',
+  glob: '正在查找文件',
+  grep: '正在搜索',
+  web_fetch: '正在读取网页',
+  write_file: '正在写入文件',
+  edit_file: '正在编辑文件',
+  run_command: '正在运行命令',
+  create_skill: '正在创建技能',
+  memory_read: '正在读取记忆',
+  memory_write: '正在写入记忆',
+  memory_delete: '正在删除记忆',
+  create_mcp: '正在配置 MCP',
+  todo_write: '正在更新待办清单',
+  present_files: '正在交付文件',
+  run_subagent: '正在交给子助手处理',
+  send_to_subagent: '正在交给子助手处理'
 }
 
 const RETRY_TEXT: Record<string, string> = {
@@ -416,60 +403,37 @@ function reduce(t: TurnTrack, ev: ChatStreamEvent): boolean {
   switch (ev.type) {
     case 'text_delta':
       content()
-      if (last?.kind === 'text') last.text += ev.text
+      // 工具调用前后的正文分段显示（工具本身不展示，中间留个段落间隔）。
+      if (last?.kind === 'text' && b.length > t.mark) last.text += ev.text
       else b.push({ kind: 'text', text: ev.text })
       return true
     case 'thinking_delta':
-      if (t.statusText === '思考中…') return false
-      t.statusText = '思考中…'
+      // 思考不单独提示（状态行的「进行中」已足够）；只把上一步留下的「正在…」工具提示收回。
+      if (t.status !== 'running' || !t.statusText) return false
+      t.statusText = undefined
       return true
     case 'tool_call': {
-      content()
-      if (ev.depth && ev.depth > 0) {
-        const sub = b.find((x) => x.kind === 'subagent' && x.id === ev.parent)
-        if (sub && sub.kind === 'subagent') sub.steps++
-        return true
-      }
-      // 续聊（send_to_subagent）与新派出同样开子智能体卡；主进程已在事件参数里补上原类型与标题。
-      if (ev.name === 'run_subagent' || ev.name === 'send_to_subagent') {
-        const a = (ev.args ?? {}) as Record<string, unknown>
-        // 后台运行的：本轮里等不到它的结果（卡片停在进行中），标明「后台」；结束后另起的那一轮会推送结论。
-        const desc = typeof a.description === 'string' ? a.description : ''
-        b.push({
-          kind: 'subagent',
-          id: ev.id,
-          agent: typeof a.agent === 'string' ? a.agent : ev.agent ?? '',
-          desc: a.run_in_background === true ? `${desc}（后台）` : desc,
-          steps: 0,
-          status: 'running'
-        })
-      } else if (ev.name === 'propose_agent') {
+      // 子助手内部的步骤不单独提示，状态行停在「正在交给子助手处理」。
+      if (ev.depth && ev.depth > 0) return false
+      if (ev.name === 'propose_agent') {
+        content()
         b.push({ kind: 'notice', text: '提议了一个新角色，请在下方名片上确认。' })
       } else if (ev.name === 'create_task') {
+        content()
         b.push({ kind: 'notice', text: '提议了一个定时任务，请在下方名片上核对并创建。' })
       } else {
-        b.push({
-          kind: 'tool',
-          id: ev.id,
-          name: TOOL_LABELS[ev.name] ?? ev.name,
-          brief: toolBrief(ev.args),
-          status: 'running'
-        })
+        if (t.status === 'retrying' || t.status === 'waiting') t.status = 'running'
+        const hint = `${TOOL_HINTS[ev.name] ?? '正在调用工具'}…`
+        if (t.mark === b.length && t.statusText === hint) return false
+        t.statusText = hint
       }
-      return true
-    }
-    case 'tool_result': {
-      if (ev.depth && ev.depth > 0) return false
-      const x = b.find((y) => (y.kind === 'tool' || y.kind === 'subagent') && y.id === ev.id)
-      if (!x || (x.kind !== 'tool' && x.kind !== 'subagent')) return false
-      x.status = ev.isError ? 'error' : 'ok'
-      if (x.kind === 'tool' && ev.isError) x.summary = ev.summary
+      t.mark = b.length
       return true
     }
     case 'stream_reset': {
-      // 与渲染层 dropStepPartial 同理：丢掉最后一个工具 / 子助手块之后的残缺正文，主进程会重跑该步。
+      // 与渲染层 dropStepPartial 同理：丢掉最近一次工具调用之后的残缺正文，主进程会重跑该步。
       let i = b.length - 1
-      while (i >= 0 && b[i].kind === 'text') i--
+      while (i >= t.mark && b[i].kind === 'text') i--
       b.splice(i + 1)
       return true
     }
@@ -846,9 +810,8 @@ export function initHub(): void {
 const HELP = [
   '直接发消息 = 在当前对话里继续聊（没有对话会自动新建）。',
   '',
-  '/new [角色名] — 新建对话',
-  '/list — 最近的对话',
-  '/use 序号 — 切换到某个对话',
+  '/new [角色名] — 新建对话（不带角色名时点选角色）',
+  '/list — 最近的对话（点一下即可切换）',
   '/stop — 停止正在进行的回复',
   '/status — 当前对话信息',
   '/help — 显示本帮助'
@@ -857,14 +820,46 @@ const HELP = [
 /** /list 最多列出的对话数（每个一枚按钮；再多手机上要翻很久，按最近活跃截取）。 */
 const LIST_MAX = 20
 
-/** 每个私聊最近一次 /list 的结果（/use 序号 据此解析）。 */
-const lastLists = new Map<string, string[]>()
+/**
+ * 指令消息用完即删：一条指令（用户发的那条 + 机器人的回执）记成一条「痕迹」。
+ * 在回执上点了按钮（如 /list 里选中对话），或者没用它、又发了新消息，整条痕迹一起删掉，聊天里只留对话本身。
+ * 每个私聊同时只有一条痕迹；平台不允许删的（飞书里用户发的消息）不记。
+ */
+interface Trail {
+  chat: ChatAddress
+  handles: MessageHandle[]
+  /** 已清理：之后才发出去的回执也立刻删掉。 */
+  closed: boolean
+}
 
-async function notice(chat: ChatAddress, view: NoticeView): Promise<void> {
+const trails = new Map<string, Trail>()
+
+function clearTrail(chat: ChatAddress): void {
+  const k = chatKey(chat)
+  const trail = trails.get(k)
+  if (!trail) return
+  trails.delete(k)
+  trail.closed = true
+  for (const h of trail.handles.splice(0)) void dropMessage(chat, h)
+}
+
+async function dropMessage(chat: ChatAddress, handle: MessageHandle): Promise<void> {
+  try {
+    await liveAdapter(chat.channel)?.deleteMessage(chat, handle)
+  } catch (e) {
+    // 超出平台的删除时限等：留着也无妨。
+    console.warn('[remote] 删除指令消息失败：', errText(e))
+  }
+}
+
+async function notice(chat: ChatAddress, view: NoticeView, trail?: Trail): Promise<void> {
   const adapter = liveAdapter(chat.channel)
   if (!adapter) return
   try {
-    await adapter.sendNotice(chat, view)
+    const h = await adapter.sendNotice(chat, view)
+    if (!h || !trail) return
+    if (trail.closed) void dropMessage(chat, h)
+    else trail.handles.push(h)
   } catch (e) {
     console.warn('[remote] 发送通知失败：', errText(e))
   }
@@ -884,43 +879,66 @@ async function handleMessage(msg: InboundMessage): Promise<void> {
   // 扫码创建时还不知道私聊 chatId（主动打招呼也可能失败）：用户第一次发消息时补上。
   const me = getChannelConfig(msg.chat.channel).users.find((u) => u.id === msg.user.id)
   if (me && !me.chatId) setUserChat(msg.chat.channel, msg.user.id, msg.chat.chatId)
+  // 新消息到来：上一条指令没用上（如 /list 没点），连同回执一起删掉。
+  clearTrail(msg.chat)
   if (msg.kind === 'unsupported' || !text)
     return notice(msg.chat, { tone: 'warning', text: '暂时只支持文字消息。' })
 
   const cmd = /^\/(\w+)(?:\s+([\s\S]*))?$/.exec(text)
-  if (cmd && (await runCommand(msg.chat, cmd[1].toLowerCase(), (cmd[2] ?? '').trim()))) return
+  if (cmd) {
+    const trail: Trail = { chat: msg.chat, handles: msg.messageId ? [msg.messageId] : [], closed: false }
+    trails.set(chatKey(msg.chat), trail)
+    if (await runCommand(msg.chat, cmd[1].toLowerCase(), (cmd[2] ?? '').trim(), trail)) return
+    // 不是指令（/技能名 …）：这条是要发给对话的正常消息，不能删。
+    if (trails.get(chatKey(msg.chat)) === trail) trails.delete(chatKey(msg.chat))
+    trail.closed = true
+  }
   // 其余斜杠开头的（/技能名 …）原样交给对话，与桌面输入框行为一致。
   await sendToSession(msg.chat, text)
 }
 
-async function runCommand(chat: ChatAddress, name: string, arg: string): Promise<boolean> {
+async function runCommand(chat: ChatAddress, name: string, arg: string, trail: Trail): Promise<boolean> {
+  const say = (view: NoticeView): Promise<void> => notice(chat, view, trail)
   switch (name) {
     case 'help':
     case 'start':
-      await notice(chat, { title: 'Deva 使用说明', text: HELP })
+      await say({ title: 'Deva 使用说明', text: HELP })
       return true
     case 'pair':
-      await notice(chat, { text: '你已经配对过了。' })
+      await say({ text: '你已经配对过了。' })
       return true
     case 'new': {
+      // 不带角色名、可选角色不止一个：出角色卡让用户点选（点了才建对话）。
+      const choices = arg ? [] : allowedPersonas(chat.channel)
+      if (choices.length > 1) {
+        const def = pickPersona(chat.channel, '')?.id
+        await say({
+          title: '新建对话',
+          text: '选择这个对话的角色：',
+          buttonLayout: 'column',
+          buttons: choices.map((p) => ({
+            label: `${p.name}${p.description ? ` · ${truncate(p.description, 60)}` : ''}`,
+            value: { k: 'new', pid: p.id },
+            primary: p.id === def
+          }))
+        })
+        return true
+      }
       const persona = pickPersona(chat.channel, arg)
       if (arg && !persona) {
         const names = allowedPersonas(chat.channel).map((p) => p.name)
-        await notice(chat, {
+        await say({
           tone: 'warning',
           text: `没有找到角色「${arg}」。可用角色：${names.join('、') || '（无）'}`
         })
         return true
       }
       if (!persona && getChannelConfig(chat.channel).scope.mode === 'personas') {
-        await notice(chat, { tone: 'warning', text: NO_PERSONA })
+        await say({ tone: 'warning', text: NO_PERSONA })
         return true
       }
       createSession(chat, persona?.id)
-      await notice(chat, {
-        tone: 'success',
-        text: `已新建对话${persona ? `（角色：${persona.name}）` : ''}，直接发消息开始吧。`
-      })
+      await say(newSessionNotice(persona?.name))
       return true
     }
     case 'list': {
@@ -928,17 +946,16 @@ async function runCommand(chat: ChatAddress, name: string, arg: string): Promise
         .filter((s) => allows(chat.channel, s))
         .sort((a, b) => b.updatedAt - a.updatedAt)
       const list = all.slice(0, LIST_MAX)
-      lastLists.set(chatKey(chat), list.map((s) => s.id))
       if (!list.length) {
         const scoped = getChannelConfig(chat.channel).scope.mode !== 'all'
-        await notice(chat, { text: `${scoped ? '回复范围内' : ''}还没有任何对话，直接发消息即可新建。` })
+        await say({ text: `${scoped ? '回复范围内' : ''}还没有任何对话，直接发消息即可新建。` })
         return true
       }
       const cur = boundSession(chat)
       const more = all.length > list.length ? `，下面是最近的 ${list.length} 个` : ''
-      await notice(chat, {
+      await say({
         title: '对话列表',
-        text: `共 ${all.length} 个对话${more}。点一下即可切换（也可以发送 /use 序号）。`,
+        text: `共 ${all.length} 个对话${more}。点一下即可切换。`,
         buttonLayout: 'column',
         buttons: list.map((s, i) => {
           const p = (s.personaId && getPersona(s.personaId)?.name) || 'Deva'
@@ -952,23 +969,12 @@ async function runCommand(chat: ChatAddress, name: string, arg: string): Promise
       })
       return true
     }
-    case 'use': {
-      const list = lastLists.get(chatKey(chat)) ?? []
-      const n = Number(arg)
-      const sid = Number.isInteger(n) && n >= 1 ? list[n - 1] : arg
-      if (!sid || !getSession(sid) || !inScope(chat.channel, sid)) {
-        await notice(chat, { tone: 'warning', text: '找不到这个对话。先发 /list 看看序号。' })
-        return true
-      }
-      await useSession(chat, sid)
-      return true
-    }
     case 'stop': {
       const sid = boundSession(chat)
       const turnId = sid ? sessionTurn.get(sid) : undefined
       const rt = getChatRuntime()
       if (!sid || !turnId || !rt || !rt.isBusy(sid)) {
-        await notice(chat, { text: '当前没有进行中的回复。' })
+        await say({ text: '当前没有进行中的回复。' })
         return true
       }
       rt.abort(turnId)
@@ -977,13 +983,13 @@ async function runCommand(chat: ChatAddress, name: string, arg: string): Promise
     case 'status': {
       const sid = boundSession(chat)
       if (!sid) {
-        await notice(chat, { text: '当前没有绑定对话，直接发消息会自动新建。' })
+        await say({ text: '当前没有绑定对话，直接发消息会自动新建。' })
         return true
       }
       const s = getSession(sid)
       const model = s?.model ? s.model.slice(s.model.indexOf(':') + 1) : '跟随默认'
       const busy = getChatRuntime()?.isBusy(sid) ? '进行中' : '空闲'
-      await notice(chat, {
+      await say({
         title: '当前对话',
         text: `${sessionTitle(sid)}\n角色：${personaName(sid)}\n模型：${model}\n状态：${busy}${
           s?.focusRoot ? `\n工作区：${s.focusRoot}` : ''
@@ -1033,6 +1039,13 @@ function createSession(chat: ChatAddress, personaId?: string): string {
     notifyState()
   }
   return sid
+}
+
+function newSessionNotice(personaName?: string): NoticeView {
+  return {
+    tone: 'success',
+    text: `已新建对话${personaName ? `（角色：${personaName}）` : ''}，直接发消息开始吧。`
+  }
 }
 
 async function useSession(chat: ChatAddress, sid: string): Promise<void> {
@@ -1179,8 +1192,19 @@ async function handleAction(a: InboundAction): Promise<ActionResult> {
     case 'use':
       if (!getSession(v.sid)) return { ok: false, message: '这个对话已经不存在了。' }
       if (!inScope(a.chat.channel, v.sid)) return { ok: false, message: '这个对话不在机器人的回复范围内。' }
+      // 从 /list 里点选的：/list 指令与列表用完即删。
+      if (a.messageId && trails.get(chatKey(a.chat))?.handles.includes(a.messageId)) clearTrail(a.chat)
       void useSession(a.chat, v.sid)
       return { ok: true, message: '已切换' }
+    case 'new': {
+      const persona = allowedPersonas(a.chat.channel).find((p) => p.id === v.pid)
+      if (!persona) return { ok: false, message: '这个角色已不可用，请重新发送 /new。' }
+      // 从角色卡点选的：/new 指令与角色卡用完即删，只留新建成功的提示。
+      if (a.messageId && trails.get(chatKey(a.chat))?.handles.includes(a.messageId)) clearTrail(a.chat)
+      createSession(a.chat, persona.id)
+      void notice(a.chat, newSessionNotice(persona.name))
+      return { ok: true, message: '已新建对话' }
+    }
     case 'stop':
       rt.abort(v.turn)
       return { ok: true, message: '已停止' }

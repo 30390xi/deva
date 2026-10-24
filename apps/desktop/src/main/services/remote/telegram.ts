@@ -8,10 +8,8 @@ import type {
   NoticeView,
   PromptView,
   RemoteAdapter,
-  ToolBlock,
   TurnPage
 } from './types'
-import { toolSummary } from './types'
 
 /**
  * Telegram 适配器：Bot API + getUpdates 长轮询（无需公网 IP / Webhook）。
@@ -159,12 +157,12 @@ interface AskDraft {
   picks: string[][]
 }
 
+/** 输入框左侧的指令菜单（指令名只能是英文，菜单上显示的是说明）。 */
 const BOT_COMMANDS = [
-  { command: 'new', description: '新建对话（可跟角色名）' },
-  { command: 'list', description: '最近的对话' },
-  { command: 'use', description: '切换到某个对话（跟序号）' },
-  { command: 'stop', description: '停止正在进行的回复' },
-  { command: 'status', description: '当前对话信息' },
+  { command: 'new', description: '新建对话' },
+  { command: 'list', description: '对话列表' },
+  { command: 'stop', description: '停止回复' },
+  { command: 'status', description: '当前对话' },
   { command: 'help', description: '使用说明' }
 ]
 
@@ -263,7 +261,9 @@ export class TelegramAdapter implements RemoteAdapter {
       chat: { channel: this.id, chatId: String(m.chat.id) },
       user: { id: String(m.from.id), name: userName(m.from) },
       text: text ?? '',
-      kind: text === null ? 'unsupported' : 'text'
+      kind: text === null ? 'unsupported' : 'text',
+      // 私聊里机器人可以删用户发的消息（48 小时内）。
+      messageId: String(m.message_id)
     })
   }
 
@@ -309,7 +309,7 @@ export class TelegramAdapter implements RemoteAdapter {
       value = p.value
       form = p.form
     }
-    const r = await host.onAction({ chat, user, value, form })
+    const r = await host.onAction({ chat, user, value, form, messageId: String(msg.message_id) })
     await reply(r.message, !r.ok)
   }
 
@@ -399,8 +399,12 @@ export class TelegramAdapter implements RemoteAdapter {
     return this.upsert(chat, promptRendered(view, (v) => this.act(v)), handle)
   }
 
-  async sendNotice(chat: ChatAddress, view: NoticeView): Promise<void> {
-    await this.upsert(chat, noticeRendered(view, (v) => this.act(v)))
+  sendNotice(chat: ChatAddress, view: NoticeView): Promise<MessageHandle | undefined> {
+    return this.upsert(chat, noticeRendered(view, (v) => this.act(v)))
+  }
+
+  async deleteMessage(chat: ChatAddress, handle: MessageHandle): Promise<void> {
+    await this.call('deleteMessage', { chat_id: chat.chatId, message_id: Number(handle) })
   }
 
   /** Telegram 私聊的 chat_id 就是对方的用户 id；对方必须先点过 Start，否则机器人无法主动发消息。 */
@@ -519,19 +523,6 @@ function head(title: string, subtitle?: string, icon?: string): string {
   return `${icon ? `${icon} ` : ''}${b(esc(title))}${subtitle ? ` · ${i(esc(subtitle))}` : ''}`
 }
 
-function toolLine(t: ToolBlock): string {
-  const icon = t.status === 'running' ? '⏳' : t.status === 'ok' ? '✅' : '❌'
-  if (t.kind === 'subagent')
-    return `${icon} 子助手「${esc(t.agent || '通用')}」${t.desc ? ` ${esc(t.desc)}` : ''} ${i(`· ${t.steps} 步`)}`
-  const err = t.status === 'error' && t.summary ? ` ${i(`— ${esc(t.summary.slice(0, 120))}`)}` : ''
-  return `${icon} ${b(esc(t.name))}${code(t.brief)}${err}`
-}
-
-/** 连续的工具块：只露一行摘要，明细默认折叠。 */
-function toolSection(run: ToolBlock[]): string {
-  return fold(`${i(esc(toolSummary(run)))}\n${run.map(toolLine).join('\n')}`)
-}
-
 const STATUS: Record<TurnPage['status'], string> = {
   running: '⏳ 进行中…',
   waiting: '⏸ 等待你的决定（见下方消息）',
@@ -543,32 +534,22 @@ const STATUS: Record<TurnPage['status'], string> = {
 
 function turnRendered(p: TurnPage, act: (v: ActionValue) => string): Rendered {
   const parts: string[] = []
-  let run: ToolBlock[] = []
-  const flushRun = (): void => {
-    if (run.length) parts.push(toolSection(run))
-    run = []
-  }
   for (const blk of p.blocks) {
-    if (blk.kind === 'tool' || blk.kind === 'subagent') {
-      run.push(blk)
-      continue
-    }
-    flushRun()
     if (blk.kind === 'text') {
       if (blk.text.trim()) parts.push(mdToHtml(blk.text))
     } else if (blk.kind === 'notice') parts.push(i(esc(blk.text)))
     else parts.push(`⚠ ${esc(blk.text.slice(0, 600))}`)
   }
-  flushRun()
 
   const subtitle = p.index > 0 ? `${p.sessionTitle}（续 ${p.index + 1}）` : p.sessionTitle
   const title = head(p.personaName, subtitle)
   if (!p.last) return { html: [title, ...parts].join('\n\n') }
 
   const final = p.status === 'done' || p.status === 'aborted' || p.status === 'error'
-  if (!parts.length) parts.push(i(final ? '（没有内容）' : '正在思考…'))
+  if (!parts.length && final) parts.push(i('（没有内容）'))
+  // 还没有正文时只留状态行（「进行中」或正在做什么），不另写「正在思考」。
   const status = [
-    p.statusText && !final ? p.statusText : STATUS[p.status],
+    p.statusText && !final ? `${p.status === 'running' ? '⏳ ' : ''}${p.statusText}` : STATUS[p.status],
     final ? `用时 ${p.elapsedSec}s` : '',
     final ? p.statusText : ''
   ]

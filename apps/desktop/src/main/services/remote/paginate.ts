@@ -14,7 +14,7 @@ export function paginate(blocks: TurnBlock[], budget: number): TurnBlock[][] {
   const cur = (): TurnBlock[] => pages[pages.length - 1]
   for (const b of blocks) {
     if (b.kind !== 'text') {
-      const cost = b.kind === 'error' || b.kind === 'notice' ? Math.min(b.text.length, 600) + 40 : 160
+      const cost = Math.min(b.text.length, 600) + 40
       if (used + cost > budget && cur().length > 0) newPage()
       cur().push(b)
       used += cost
