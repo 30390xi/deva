@@ -6,12 +6,13 @@ import { RELEASES_URL, type UpdateState } from '../../../shared/update'
 const PLATFORM = window.deva?.platform ?? (navigator.userAgent.includes('Mac') ? 'darwin' : '')
 const IS_MAC = PLATFORM === 'darwin'
 const IS_LINUX = PLATFORM === 'linux'
-/** 手动更新时的说明文案：各平台的「下载之后怎么装」不一样。 */
-const MANUAL_HINT_KEY = IS_MAC
-  ? 'settings.update.manualHintMac'
-  : IS_LINUX
-    ? 'settings.update.manualHintLinux'
-    : 'settings.update.manualHint'
+/** 手动更新时的说明文案：各平台（Linux 再分 deb / AppImage）的「下载之后怎么装」不一样。 */
+function manualHintKey(file: string | null): string {
+  if (IS_MAC) return 'settings.update.manualHintMac'
+  if (IS_LINUX)
+    return file?.endsWith('.deb') ? 'settings.update.manualHintDeb' : 'settings.update.manualHintLinux'
+  return 'settings.update.manualHint'
+}
 
 /**
  * 关于页的「检查更新」：只在点按钮时检查。状态由主进程持有（services/updater.ts），这里只展示与触发——
@@ -49,7 +50,7 @@ export function UpdateSection(): React.JSX.Element {
   )
 
   if (state.phase === 'available') {
-    const { release, mode } = state
+    const { release, mode, file } = state
     return (
       <div className="cf-update">
         <div className="cf-update__status">
@@ -64,7 +65,11 @@ export function UpdateSection(): React.JSX.Element {
               ? t('settings.update.downloadPortable')
               : t('settings.update.downloadInstaller')}
         </button>
-        {mode === 'manual' && <p className="cf-update__hint">{t(MANUAL_HINT_KEY)}</p>}
+        {mode === 'manual' && (
+          <p className="cf-update__hint">
+            {t(manualHintKey(file)).replace('{file}', file ?? '')}
+          </p>
+        )}
         {mode === 'portable' && (
           <p className="cf-update__hint">{t('settings.update.portableHint')}</p>
         )}

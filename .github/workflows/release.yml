@@ -1,4 +1,4 @@
-# 有新的 v* tag 时打包 Windows（exe 安装包 + zip 便携版）/ macOS 安装包，传到对应的 GitHub Release，并按提交自动生成版本说明。
+# 有新的 v* tag 时打包 Windows（exe 安装包 + zip 便携版）/ macOS 安装包 / Linux（AppImage + deb），传到对应的 GitHub Release，并按提交自动生成版本说明。
 # 发版前先改 apps/desktop/package.json 的 version 并提交，然后二选一：
 #  - 在 GitHub 网页上新建 Release（顺带建 tag）并直接发布：CI 几分钟后传上安装包、把自动生成的说明接在
 #    网页上写的说明后面（没写就只有自动生成的）。之后随时可以在网页上改说明。
@@ -6,12 +6,15 @@
 #  - 本地 git tag v<version> && git push origin v<version>：CI 建成草稿 Release，检查 / 改写说明后再点
 #    「Publish release」；发布前对外不可见。（网页上「Save draft」不会建 tag，触发不了 CI，所以要先审再发只能走这条。）
 # 本地预览版本说明：node .github/scripts/release-notes.mjs v<version> HEAD
+# 只想试打包（比如改了打包配置）：在 Actions 页选 Release →「Run workflow」，各平台的包作为 artifact 留在本次运行里，
+# 不建 Release、不校验版本。
 name: Release
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,6 +36,9 @@ jobs:
           - name: mac-x64
             os: macos-15-intel
             args: --mac --x64
+          - name: linux-x64
+            os: ubuntu-latest
+            args: --linux AppImage deb --x64
     env:
       # 没有 Apple 开发者证书，跳过钥匙串查找签名身份；mac 包改由 afterPack 钩子做 ad-hoc 签名
       CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -47,6 +53,7 @@ jobs:
           cache: pnpm
 
       - name: 校验 tag 与 package.json 版本一致
+        if: github.event_name == 'push'
         shell: bash
         run: |
           PKG_VERSION=$(node -p "require('./apps/desktop/package.json').version")
@@ -74,10 +81,14 @@ jobs:
             apps/desktop/dist/latest.yml
             apps/desktop/dist/*-portable.zip
             apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
           if-no-files-found: error
 
   release:
     needs: build
+    # 手动「Run workflow」只试打包，不发版
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write

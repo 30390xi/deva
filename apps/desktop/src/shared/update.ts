@@ -25,7 +25,8 @@ export type UpdateState =
   | { phase: 'idle' }
   | { phase: 'checking' }
   | { phase: 'latest' }
-  | { phase: 'available'; release: UpdateRelease; mode: UpdateMode }
+  /** file：manual 时浏览器里要下载的文件名（没有对应文件、只能打开 Release 页面时为 null），界面据此给安装说明。 */
+  | { phase: 'available'; release: UpdateRelease; mode: UpdateMode; file: string | null }
   | { phase: 'downloading'; release: UpdateRelease; percent: number }
   | { phase: 'downloaded'; release: UpdateRelease }
   /** stage=download 时带上 release：界面可以「重试下载」，不用重新检查。 */

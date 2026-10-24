@@ -62,9 +62,13 @@ dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 linux:
+  # AppImage = 任意发行版下载即用；deb = Debian / Ubuntu 系安装包（菜单入口、/usr/bin/deva，Ubuntu 24+ 的 AppArmor 配置）
   target:
     - AppImage
+    - deb
   category: Development
+  # deb 必填（默认取 package.json 的 author，但那里没有邮箱）；用 GitHub 的 noreply 地址，不在包里暴露真实邮箱
+  maintainer: sqfcy <38500955+sqfcyily@users.noreply.github.com>
   # 可执行文件名默认取 package.json 的 name（@deva/desktop → @devadesktop），带 @ 与 / 无法用于文件路径，
   # AppImage 打包会直接失败；显式给一个干净的名字。
   executableName: deva
@@ -74,5 +78,12 @@ linux:
   # 让 .desktop 文件名与 Electron 的 app_id / WM_CLASS 对齐，任务栏才能把窗口归到 Deva 图标下
   # （desktopName 本身在 apps/desktop/package.json 里）
   syncDesktopName: true
-  # AppImage 文件名带架构，以后加 arm64 也不会重名
+  # 文件名带架构，以后加 arm64 也不会重名（electron-builder 按格式换架构名：AppImage 是 x86_64，deb 是 amd64）
   artifactName: ${productName}-${version}-${arch}.${ext}
+
+deb:
+  # 包名默认取 package.json 的 name（@deva/desktop），装好后得 apt remove 一个奇怪的名字；统一叫 deva
+  packageName: deva
+  # 默认的 AppArmor 配置只放行 /opt/Deva/deva，而那已被换成启动脚本（见 scripts/linux-launcher.cjs），
+  # 真正的 Electron 是 deva-bin；不放行它的话 Ubuntu 24+ 上沙箱建不起来、应用直接打不开。见模板内说明
+  appArmorProfile: build/linux/apparmor-profile.tpl

@@ -67,7 +67,18 @@ function canAutoInstall(): boolean {
   return process.platform === 'win32' && app.isPackaged && installedByNsis()
 }
 
-/** 本机该下载的文件名（安装包 / 便携版 zip / AppImage）；没有对应文件的平台返回 null（只能打开 Release 页面）。 */
+/**
+ * Linux 的安装方式：AppImage 运行时会带上 APPIMAGE 环境变量；deb 固定装在 /opt/Deva（见 electron-builder 的 deb 目标）。
+ * 都不是（开发模式、自己解压的 linux-unpacked）返回 null。
+ */
+function linuxPackage(): 'appimage' | 'deb' | null {
+  if (!app.isPackaged) return null
+  if (process.env.APPIMAGE) return 'appimage'
+  if (process.execPath.startsWith('/opt/Deva/')) return 'deb'
+  return null
+}
+
+/** 本机该下载的文件名（安装包 / 便携版 zip / AppImage / deb）；没有对应文件的情形返回 null（只能打开 Release 页面）。 */
 function installerName(version: string): string | null {
   if (process.platform === 'win32')
     return isPortable() ? `Deva-${version}-portable.zip` : `Deva-${version}-setup.exe`
@@ -76,12 +87,16 @@ function installerName(version: string): string | null {
     const arm = process.arch === 'arm64' || app.runningUnderARM64Translation
     return `Deva-${version}-${arm ? 'arm64' : 'x64'}.dmg`
   }
-  // Linux：AppImage 文件名带架构（见 electron-builder.yml 的 linux.artifactName）。
-  // 注意 electron-builder 对 AppImage 用的是 Linux 架构名（x64 → x86_64、arm64 仍是 arm64），
-  // 不是 Windows/macOS 那套 x64。下载后是用户自己替换文件，不做应用内自动安装。
+  // Linux：按安装方式给同类包，文件名带架构（见 electron-builder.yml 的 linux.artifactName）。
+  // 注意 electron-builder 用的是各格式自己的架构名：AppImage 的 x64 叫 x86_64、deb 叫 amd64，arm64 都不变，
+  // 不是 Windows/macOS 那套 x64。下载后由用户自己替换 / 安装，不做应用内自动安装。
   if (process.platform === 'linux') {
-    const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'i386' : 'x86_64'
-    return `Deva-${version}-${arch}.AppImage`
+    const pkg = linuxPackage()
+    if (pkg === 'deb') return `Deva-${version}-${process.arch === 'arm64' ? 'arm64' : 'amd64'}.deb`
+    if (pkg === 'appimage') {
+      const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'i386' : 'x86_64'
+      return `Deva-${version}-${arch}.AppImage`
+    }
   }
   return null
 }
@@ -120,7 +135,7 @@ async function check(): Promise<void> {
     }
     const release = { version, pageUrl: data.html_url }
     found = { release, mode, installerUrl: installer?.browser_download_url ?? null }
-    setState({ phase: 'available', release, mode })
+    setState({ phase: 'available', release, mode, file: installer?.name ?? null })
   } catch (e) {
     setState({ phase: 'error', stage: 'check', message: errorText(e) })
   }
