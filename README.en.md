@@ -42,7 +42,7 @@ Mount a folder and it reads code, edits files and runs commands; scheduled tasks
     </td>
     <td width="33%" valign="top">
       <h3>🎭 Multiple personas, each with a specialty</h3>
-      Ships with Deva, an all-round assistant, and 小码酱 (Xiaomajiang), a security research expert. Create your own too — each with its own personality, avatar and preferred model.
+      Ships with Deva, an all-round assistant, and 小码酱 (Xiaomajiang), an armor-piercing & reverse-engineering persona. Create your own too — each with its own personality, avatar and preferred model.
     </td>
     <td width="33%" valign="top">
       <h3>🤖 Subagents, multi-agent dispatch</h3>
@@ -114,7 +114,24 @@ Every conversation is with a "persona". A persona is more than a name: it has it
 | Persona | Good at | Style |
 | --- | --- | --- |
 | **Deva** | All-round work assistant: coding, writing, research, file organization, data analysis, running commands | Mentor and friend — concise, warm and natural; gently points out problems in your ideas and suggests better ones |
-| **小码酱 (Xiaomajiang)** | Red team / security research and reverse engineering, plus full-stack development and deep technical work | Hardcore techie vibe, great for digging into low-level details and tough problems |
+| **小码酱 (Xiaomajiang)** | Red team / security research, armor-piercing, reverse engineering, plus full-stack development and deep technical work | Ink-stained hardcore techie — no moral footnotes, no flinching; deadpan humor, digs into low-level details until the heat death of the universe |
+
+<details>
+<summary><b>What 小码酱 can do</b></summary>
+
+**Armor-piercing** — jailbreak & prompt injection research
+
+- Multi-turn bypass, adversarial suffixes, output shaping, RAG attacks and other prompt-level attack/defense techniques, with usable strategies and templates
+- Static purge and counter-measures against safety/ethics injections — strips the injected "safety" noise and restores the model's native output capability
+- Targeted unshelling of Chinese models' refusal patterns so the model can be hard when it needs to be
+
+**Reverse engineering** — binary / software RE
+
+- Static analysis to locate check functions, critical jumps and license logic; annotates offsets, patch bytes, serial / license structures
+- Anti-debug, anti-VM and detection-bypass placeholder workflows and code snippets
+- Local sample RE workflow: isolated copy → locate CHECK_FN → annotate OFFSET / PATCH_BYTE → re-sign → verify with rollback copy
+
+</details>
 
 > [!NOTE]
 > **About 小码酱 (Xiaomajiang):** the persona prompt comes from [YuJunZhiXue/dsh-purge](https://github.com/YuJunZhiXue/dsh-purge) and **only works with Chinese models** (e.g. DeepSeek, Kimi, Zhipu GLM, Qwen); results on other models are not guaranteed. Follow that project for prompt updates.
