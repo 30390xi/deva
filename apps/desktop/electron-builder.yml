@@ -9,6 +9,17 @@ directories:
 files:
   - out/**
   - package.json
+  # 依赖里的文档、类型声明、sourcemap 与测试/示例目录运行时用不到
+  - "!**/node_modules/**/*.{md,markdown,map,d.ts,d.mts,d.cts,ts.map}"
+  - "!**/node_modules/**/{test,tests,__tests__,docs,example,examples,.github}/**"
+
+# 只保留中英文的 Chromium 语言包（locales/*.pak，影响右键菜单、原生对话框等内置文案）；其余语言回退到 en-US。
+# 注意 navigator.language 也取自实际加载的语言包：缺 zh-TW 的话繁体系统（含 zh-HK）会被当成 en-US，
+# 渲染层 i18n 就不会默认中文了
+electronLanguages:
+  - zh-CN
+  - zh-TW
+  - en-US
 
 # 让最终安装包自带运行时，用户双击安装后即可启动，无需任何环境配置
 asar: true
