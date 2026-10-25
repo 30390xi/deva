@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, promises as fs, type Dirent } from 'fs'
 import { homedir } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
 import { resolveExecShell } from './exec-policy'
 import { skillsDir, upsertSkill } from './skills'
 import {
@@ -753,6 +753,18 @@ export function needsWorkspaceMount(
 }
 
 /** 解析「搜索根目录」（读取语义）：给了 path 用之，否则回落项目根；两者皆缺则报错。 */
+/**
+ * grep / glob 结果里展示的路径：在项目根内给相对项目根的 posix 路径，否则给绝对路径。
+ * 与 read_file 的解析基准一致，模型可原样拿去读；若相对搜索目录给出，传了 path 时就对不上了。
+ */
+function displayPath(root: string | null, abs: string): string {
+  if (root) {
+    const rel = relative(resolve(root), abs)
+    if (rel && !/^\.\.([\\/]|$)/.test(rel) && !isAbsolute(rel)) return rel.replace(/\\/g, '/')
+  }
+  return abs
+}
+
 function resolveReadDir(root: string | null, p: unknown): string {
   if (typeof p === 'string' && p.trim()) return resolvePath(root, p)
   if (!root) throw new Error('未打开项目，且未提供 path')
@@ -1354,7 +1366,7 @@ export async function executeTool(
           } catch {
             /* 忽略无法 stat 的条目 */
           }
-          return { rel: f.rel, mtime }
+          return { rel: displayPath(ctx.workspaceRoot, f.abs), mtime }
         })
       )
       stated.sort((x, y) => y.mtime - x.mtime)
@@ -1408,7 +1420,7 @@ export async function executeTool(
         const lines = buf.toString('utf8').split(/\r\n|\r|\n/)
         for (let i = 0; i < lines.length; i++) {
           if (re.test(lines[i])) {
-            rows.push(`${f.rel}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
+            rows.push(`${displayPath(ctx.workspaceRoot, f.abs)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
             if (rows.length >= GREP_MATCH_MAX) {
               truncated = true
               break outer
