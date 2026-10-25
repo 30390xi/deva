@@ -79,9 +79,15 @@ export const toolSpecs: ToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        pattern: { type: 'string', description: '正则表达式（JavaScript 语法）' },
+        pattern: {
+          type: 'string',
+          description: '正则表达式（JavaScript 语法，支持 \\p{…}）。搜字面量时转义元字符，如 foo\\(；非法正则会退化为纯文本搜索。'
+        },
         path: { type: 'string', description: '搜索根目录，相对项目根或绝对路径。默认项目根。' },
-        glob: { type: 'string', description: '仅搜索匹配该 glob 的文件（如 *.ts、**/*.tsx）。可选。' },
+        glob: {
+          type: 'string',
+          description: '仅搜索匹配该 glob 的文件。不含 / 时只匹配文件名（*.ts 匹配任意层级的 .ts）；含 / 时匹配相对路径（如 src/**/*.tsx）。可选。'
+        },
         ignore_case: { type: 'boolean', description: '忽略大小写。默认 false。' }
       },
       required: ['pattern']
@@ -763,6 +769,34 @@ function escapeRe(s: string): string {
 }
 
 /**
+ * 宽容地编译 grep 的 pattern，避免模型常见写法直接报「正则错误」浪费一轮：
+ * - 前缀 `(?i)`（ripgrep / Python 风格）转为 i 标志；
+ * - 先带 u 标志编译，让 `\p{Han}` 等生效（不带 u 时会被当成字面 `p{Han}`、静默无匹配），失败再去掉 u；
+ * - 仍不是合法正则（如 `foo(`、`[0-9`、`*.ts`）则按纯文本搜索，并在结果里注明。
+ */
+function compileGrepPattern(pattern: string, ignoreCase: boolean): { re: RegExp; note?: string } {
+  let src = pattern
+  let flags = ignoreCase ? 'i' : ''
+  if (src.startsWith('(?i)') && src.length > 4) {
+    src = src.slice(4)
+    if (!flags.includes('i')) flags += 'i'
+  }
+  try {
+    return { re: new RegExp(src, flags + 'u') }
+  } catch {
+    // 落到不带 u 的编译
+  }
+  try {
+    return { re: new RegExp(src, flags) }
+  } catch (e) {
+    return {
+      re: new RegExp(escapeRe(src), flags),
+      note: `（pattern 不是合法的 JS 正则：${(e as Error).message}；已按纯文本搜索）`
+    }
+  }
+}
+
+/**
  * 把 glob 模式编译为正则（匹配 posix 相对路径）。支持子集：
  * `**`（跨目录任意层级）、`*`（单层任意）、`?`（单字符）、`{a,b,c}`（字面量分支）。
  * 足够覆盖 **\/*.ts、src/**\/*.{ts,tsx} 这类日常用法；不支持字符类/否定等高级语法。
@@ -1338,15 +1372,16 @@ export async function executeTool(
     if (name === 'grep') {
       const pattern = typeof a.pattern === 'string' ? a.pattern : ''
       if (!pattern) return { content: '缺少 pattern 参数', summary: '参数无效', isError: true }
-      let re: RegExp
-      try {
-        re = new RegExp(pattern, a.ignore_case === true ? 'i' : '')
-      } catch (e) {
-        return { content: `无效的正则：${(e as Error).message}`, summary: '正则错误', isError: true }
-      }
+      const { re, note } = compileGrepPattern(pattern, a.ignore_case === true)
       const target = resolveReadDir(ctx.workspaceRoot, a.path)
       let globRe: RegExp | null = null
-      if (typeof a.glob === 'string' && a.glob.trim()) globRe = globToRegExp(a.glob.trim())
+      // 不含 / 的 glob（如 *.ts）只匹配文件名，与 ripgrep 一致——否则只命中根目录文件、静默返回无匹配。
+      let globBase = false
+      if (typeof a.glob === 'string' && a.glob.trim()) {
+        const g = a.glob.trim().replace(/\\/g, '/')
+        globRe = globToRegExp(g)
+        globBase = !g.includes('/')
+      }
       // path 可为目录（递归遍历）或单个文件（直接搜该文件）——修复「path 指向文件时静默返回无匹配」。
       // 路径不存在则明确报错，而非误导性的空结果。
       let st: import('fs').Stats
@@ -1361,7 +1396,7 @@ export async function executeTool(
       const rows: string[] = []
       let truncated = false
       outer: for (const f of files) {
-        if (globRe && !globRe.test(f.rel)) continue
+        if (globRe && !globRe.test(globBase ? basename(f.rel) : f.rel)) continue
         let buf: Buffer
         try {
           buf = await fs.readFile(f.abs)
@@ -1382,9 +1417,11 @@ export async function executeTool(
         }
       }
       return {
-        content: rows.length
-          ? rows.join('\n') + (truncated ? `\n…（匹配过多，仅列前 ${GREP_MATCH_MAX} 处）` : '')
-          : '（无匹配）',
+        content:
+          (note ? `${note}\n` : '') +
+          (rows.length
+            ? rows.join('\n') + (truncated ? `\n…（匹配过多，仅列前 ${GREP_MATCH_MAX} 处）` : '')
+            : '（无匹配）'),
         summary: rows.length ? (truncated ? `${rows.length}+ 处` : `${rows.length} 处`) : '无匹配'
       }
     }
