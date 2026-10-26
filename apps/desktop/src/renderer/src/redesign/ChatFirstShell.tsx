@@ -3512,6 +3512,23 @@ function Conversation({
     else if (!isTail && dist < LOAD_MORE_PX) loadLater()
   }
 
+  // 内容变矮或可视区变高后已到底（如上滚后收起展开的工作过程 / 思考，页面缩短、下方再无内容）：滚动位置常常
+  // 没变，不触发 onScroll，贴底态停在「未贴底」，「回到最新」一直挂着。故在尺寸变化时补判一次。只补回到底部
+  // 这一向：内容变高时不动贴底态，否则流式新内容撑高的那一刻（滚到底的副作用还没跑）会被误判为离底、断掉跟随。
+  useEffect(() => {
+    const el = scrollRef.current
+    const inner = el?.firstElementChild
+    if (!el || !inner || !isTail) return
+    const ro = new ResizeObserver(() => {
+      if (stickRef.current || el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_THRESHOLD) return
+      stickRef.current = true
+      setAtBottom(true)
+    })
+    ro.observe(el)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [isTail])
+
   // 回到最新：平滑滚到底并恢复自动跟随。正看着跳转过去的一段时，换回最后几轮直接落到底，不滚过中间。
   const jumpToLatest = (): void => {
     const el = scrollRef.current
