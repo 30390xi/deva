@@ -244,6 +244,14 @@ function reorderIds(
 const BOTTOM_THRESHOLD = 64
 
 /**
+ * 长对话分段渲染：打开对话时只渲染最后 WINDOW_TURNS 轮，滚到离已渲染内容的顶边（或跳转后的底边）
+ * 不足 LOAD_MORE_PX 时再补一段同样多的轮。整条历史一次挂载的话，Markdown 解析、代码高亮与整页布局都随
+ * 长度线性增长：几百轮的对话每次切换都要卡十几秒，上千轮能把渲染进程撑崩。
+ */
+const WINDOW_TURNS = 10
+const LOAD_MORE_PX = 600
+
+/**
  * 右侧「对话轮次索引」面板参数。纯渲染层视觉常量：不持久化、不给设置项。
  * 面板只索引用户消息（对话的锚点），轮次少时不出现，避免短对话占位。
  */
@@ -3208,6 +3216,61 @@ function Conversation({
     }
     return arr
   }, [messages])
+  // 各轮首条消息（用户消息）的下标：分段渲染按整轮取边界。
+  const turnStart = useMemo(() => {
+    const arr: number[] = []
+    messages.forEach((m, i) => {
+      if (m.role === 'user') arr.push(i)
+    })
+    return arr
+  }, [messages])
+  const lastTurn = turnStart.length - 1
+  /** 第 turn 轮的首条消息下标；第 0 轮及更早从 0 起，带上首轮之前的前言（压缩摘要等）。 */
+  const startOfTurn = (turn: number): number => (turn <= 0 ? 0 : turnStart[turn])
+  /** 第 turn 轮的末条消息下标。 */
+  const endOfTurn = (turn: number): number =>
+    turn + 1 < turnStart.length ? turnStart[turn + 1] - 1 : messages.length - 1
+
+  // 分段渲染的范围（见 WINDOW_TURNS）：首末两轮的轮下标，to 为 null 即一直到最新（含此后新到的轮）。
+  // 换了对话（sid 不符）回到默认的最后几轮；同一对话的消息整份重建（删轮 / 回滚 / 压缩后重载）时沿用原范围，
+  // 停在原来那片内容附近，超出现有轮数的部分收拢到末尾。不合规时在渲染中就地改正（React 允许组件在渲染中
+  // 更新自身状态），不先按旧范围画一遍——换对话时那一遍就是整条历史。
+  const [win, setWin] = useState<{ sid: string; from: number; to: number | null } | null>(null)
+  let range = messages.length > 0 && win && win.sid === currentSessionId ? win : null
+  if (messages.length > 0) {
+    const fromTurn = range ? Math.min(range.from, lastTurn) : lastTurn - WINDOW_TURNS + 1
+    const toTurn = range && range.to !== null && range.to < lastTurn ? Math.max(range.to, fromTurn) : null
+    if (!range || range.from !== fromTurn || range.to !== toTurn) {
+      range = { sid: currentSessionId, from: fromTurn, to: toTurn }
+      setWin(range)
+    }
+  }
+  const from = range ? startOfTurn(range.from) : 0
+  const to = range && range.to !== null ? endOfTurn(range.to) : messages.length - 1
+  /** 已渲染到最新一条：不在时（跳转到较早的轮后）不跟随新内容、不显示底部状态行，「回到最新」常显。 */
+  const isTail = to === messages.length - 1
+  // 补上更早一段后要保持的「距底距离」（内容加在上方，按距底距离落位，看着的内容不动）。
+  const restoreRef = useRef<number | null>(null)
+  // 跳转目标轮还没渲染：先换范围，渲染后再落位。
+  const pendingJumpRef = useRef<number | null>(null)
+  // 从中间一段回到最新：换回最后几轮后直接落到底。
+  const pendingBottomRef = useRef(false)
+  const loadEarlier = (): void => {
+    if (!range || from <= 0) return
+    const el = scrollRef.current
+    if (el) restoreRef.current = el.scrollHeight - el.scrollTop
+    setWin({ ...range, from: range.from - WINDOW_TURNS })
+  }
+  const loadLater = (): void => {
+    if (!range || range.to === null) return
+    const next = range.to + WINDOW_TURNS
+    setWin({ ...range, to: next >= lastTurn ? null : next })
+  }
+  /** 回到最后几轮（下一次渲染落到底）。 */
+  const resetToTail = (): void => {
+    pendingBottomRef.current = true
+    setWin(null)
+  }
   // 右侧轮次索引的数据源：只取用户消息，turn 与上面的 turnOf 同源（每遇 user +1，0 基）。
   // 正文为空（纯附件）时回落到附件名，再空则用占位文案，保证每轮都有可点的锚点。
   const tocItems = useMemo<TocItem[]>(() => {
@@ -3298,8 +3361,8 @@ function Conversation({
   )
 
 
-  // 跳到某一轮的用户消息：复用右键删除已标注的 data-turn 作锚点。
-  const jumpToTurn = useCallback((turn: number): void => {
+  // 滚到某一轮的用户消息（须已渲染）：复用右键删除已标注的 data-turn 作锚点。
+  const scrollToTurn = (turn: number): void => {
     const el = scrollRef.current
     if (!el) return
     const target = el.querySelector<HTMLElement>(`.cf-msg.is-user[data-turn="${turn}"]`)
@@ -3313,13 +3376,45 @@ function Conversation({
     )
     // 贴底态按目标位置同步算，不能等 onScroll 回填：目标与当前位置相同时一次 scroll 都不会触发，
     // 贴底态会卡在错值（§4.8 流式跟随据此决策）。
-    const atBot = el.scrollHeight - top - el.clientHeight <= BOTTOM_THRESHOLD
+    const atBot = isTail && el.scrollHeight - top - el.clientHeight <= BOTTOM_THRESHOLD
     stickRef.current = atBot
     setAtBottom(atBot)
     // 直接落位，不用 behavior:"smooth"：长对话里一路滚过去既慢又晃眼。
     el.scrollTop = top
     setActiveTurn(turn)
-  }, [])
+  }
+  // 跳到某一轮：已渲染就直接滚过去；还没渲染则改为从该轮起渲染一段（不把中间的轮全渲染出来），渲染后再落位，
+  // 它上方的内容随即按滚到顶部补上。
+  const jumpToTurn = (turn: number): void => {
+    const i = turnStart[turn]
+    if (i === undefined) return
+    if (i >= from && i <= to) {
+      scrollToTurn(turn)
+      return
+    }
+    const end = turn + WINDOW_TURNS - 1
+    pendingJumpRef.current = turn
+    setWin({ sid: currentSessionId, from: turn, to: end >= lastTurn ? null : end })
+  }
+  // 换了渲染范围之后、绘制之前落位：补上更早一段时保持距底距离，跳转则滚到目标轮，回到最新则落到底。
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (restoreRef.current !== null) {
+      el.scrollTop = el.scrollHeight - restoreRef.current
+      restoreRef.current = null
+    }
+    if (pendingJumpRef.current !== null) {
+      const turn = pendingJumpRef.current
+      pendingJumpRef.current = null
+      scrollToTurn(turn)
+    }
+    if (pendingBottomRef.current) {
+      pendingBottomRef.current = false
+      el.scrollTop = el.scrollHeight
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win])
 
   const exitSelect = (): void => {
     setSelecting(false)
@@ -3387,33 +3482,51 @@ function Conversation({
     setCtxMenu(null)
     setRewind(null)
     setActiveTurn(-1)
+    restoreRef.current = null
+    pendingJumpRef.current = null
+    pendingBottomRef.current = false
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [currentSessionId])
 
-  // 监听用户滚动：据距底距离更新「是否贴底」。程序化滚到底同样触发，结果仍为贴底、幂等。
+  // 换了渲染范围或消息整份重建后（刚打开 / 刚补过一段 / 刚跳转 / 删轮后）离边缘仍不远（内容填不满一屏等）：
+  // 接着补，直到够滚动或到头。排在上面两个滚到底的副作用之后，量的是落位后的位置。
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (from > 0 && el.scrollTop < LOAD_MORE_PX) loadEarlier()
+    else if (!isTail && el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_MORE_PX) loadLater()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win, messages])
+
+  // 监听用户滚动：据距底距离更新「是否贴底」，离已渲染内容的边缘不远时补一段。程序化滚到底同样触发，结果仍为贴底、幂等。
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
-    const atBot = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    const atBot = isTail && dist <= BOTTOM_THRESHOLD
     stickRef.current = atBot
     setAtBottom((prev) => (prev === atBot ? prev : atBot))
     scheduleActive()
+    if (from > 0 && el.scrollTop < LOAD_MORE_PX) loadEarlier()
+    else if (!isTail && dist < LOAD_MORE_PX) loadLater()
   }
 
-  // 回到最新：平滑滚到底并恢复自动跟随。
+  // 回到最新：平滑滚到底并恢复自动跟随。正看着跳转过去的一段时，换回最后几轮直接落到底，不滚过中间。
   const jumpToLatest = (): void => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     stickRef.current = true
     setAtBottom(true)
+    if (isTail) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    else resetToTail()
   }
 
   // 发送后必看到自己的消息与回复：无论此刻是否上滚，都恢复贴底跟随。
   const handleSend = (text: string, attachments?: SendAttachment[]): Promise<boolean> => {
     stickRef.current = true
     setAtBottom(true)
+    if (!isTail) resetToTail()
     return onSend(text, attachments)
   }
 
@@ -3490,39 +3603,42 @@ function Conversation({
                 {needModelSetup && <ModelSetupCard />}
               </>
             ) : selecting ? (
-              // 选择态：按「轮」分组，每轮一张可勾选卡片；前言（turn<0）原样呈现、不可选。
-              groupTurns(messages).map((g) => {
-                const items = messages.slice(g.from, g.to)
-                if (g.turn < 0)
+              // 选择态：按「轮」分组，每轮一张可勾选卡片；前言（turn<0）原样呈现、不可选。只画已渲染范围内的轮
+              // （范围按整轮取，各轮要么整轮在内、要么整轮在外）。
+              groupTurns(messages)
+                .filter((g) => g.from >= from && g.to - 1 <= to)
+                .map((g) => {
+                  const items = messages.slice(g.from, g.to)
+                  if (g.turn < 0)
+                    return (
+                      <Fragment key={`pre-${g.from}`}>
+                        {items.map((m, k) => renderMsg(m, g.from + k))}
+                      </Fragment>
+                    )
+                  const isSel = selected.has(g.turn)
                   return (
-                    <Fragment key={`pre-${g.from}`}>
-                      {items.map((m, k) => renderMsg(m, g.from + k))}
-                    </Fragment>
-                  )
-                const isSel = selected.has(g.turn)
-                return (
-                  <div
-                    key={`turn-${g.turn}`}
-                    className={`cf-turn is-selectable${isSel ? ' is-selected' : ''}`}
-                    role="button"
-                    aria-pressed={isSel}
-                    onClick={() => toggleTurn(g.turn)}
-                  >
-                    <span className="cf-turn__check" aria-hidden>
-                      {isSel && <Check size={13} />}
-                    </span>
-                    <div className="cf-turn__body">
-                      {items.map((m, k) => renderMsg(m, g.from + k))}
+                    <div
+                      key={`turn-${g.turn}`}
+                      className={`cf-turn is-selectable${isSel ? ' is-selected' : ''}`}
+                      role="button"
+                      aria-pressed={isSel}
+                      onClick={() => toggleTurn(g.turn)}
+                    >
+                      <span className="cf-turn__check" aria-hidden>
+                        {isSel && <Check size={13} />}
+                      </span>
+                      <div className="cf-turn__body">
+                        {items.map((m, k) => renderMsg(m, g.from + k))}
+                      </div>
                     </div>
-                  </div>
-                )
-              })
+                  )
+                })
             ) : (
               <>
-                {messages.map((m, i) => renderMsg(m, i, turnOf[i]))}
-                {!statusInMsg && statusLine}
+                {messages.slice(from, to + 1).map((m, k) => renderMsg(m, from + k, turnOf[from + k]))}
+                {isTail && !statusInMsg && statusLine}
                 {/* 已有对话但模型被删光：引导卡接在末尾（不进对话记录）。 */}
-                {needModelSetup && !streaming && <ModelSetupCard />}
+                {isTail && needModelSetup && !streaming && <ModelSetupCard />}
               </>
             )}
           </div>
