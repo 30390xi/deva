@@ -569,6 +569,20 @@ body.cf-resizing-y * {
   margin-right: 4px;
   color: var(--danger);
 }
+/* 挂了文件夹的下行：文件夹图标 + 文件夹名，替代角色名。图标与文字同色，不抢标题的视觉。 */
+.cf-thread__owner--ws {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cf-thread__owner--ws svg {
+  flex: none;
+}
+.cf-thread__wsname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 角色行（与对话行同构：头像 | 名称/专长/标签） */
 .cf-prow {
@@ -2218,13 +2232,28 @@ body.cf-resizing-y * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 文件夹标签最多占行宽四成，超出截断文件夹名（悬停看完整路径），不挤掉标题和时间。 */
 .cf-convrow__proj {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 11px;
   color: var(--fg-muted);
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
+}
+.cf-convrow__proj svg {
+  flex: none;
+}
+.cf-convrow__projname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cf-convrow__time {
   margin-left: auto;
