@@ -8,6 +8,9 @@ import {
   writeAvatarImage as writeAvatarImageFile
 } from './avatar-image'
 import { getConfig, getDevaHome, setConfig } from './config'
+import { pruneRoles } from './ext-roles'
+import { setSkillEnabled } from './skills'
+import { setEnabled as setMcpEnabled } from './mcp-config'
 import { DEFAULT_PERSONAS, LEGACY_PROMPT_HASHES, type DefaultPersona } from './default-personas'
 import { fmScalar, fmString, parseFrontmatter } from './frontmatter'
 import { reassignTaskPersona } from './tasks'
@@ -293,6 +296,21 @@ export function upsertPersona(input: PersonaUpsertInput): PersonaRecord {
   )
 }
 
+/** 技能 / MCP 的可用角色里剔除 keep 不认的角色；指定的角色都没了的项改回所有角色并停用（MCP 随之断开）。 */
+function pruneExtRoles(keep: (personaId: string) => boolean): void {
+  const orphaned = pruneRoles(keep)
+  for (const id of orphaned.skills) setSkillEnabled(id, false)
+  for (const id of orphaned.mcp) setMcpEnabled(id, false)
+}
+
+/** 启动时清理：可用角色里已不存在的角色（手改配置、旧版本留下的）一并按删除角色处理。 */
+export function pruneOrphanExtRoles(): void {
+  const ids = new Set(listPersonas().map((p) => p.id))
+  // 种子之后至少有默认角色：读出空表多半是角色目录读失败，这时清理会把所有指定了角色的项都停掉，宁可跳过。
+  if (!ids.size) return
+  pruneExtRoles((p) => ids.has(p))
+}
+
 export function deletePersona(id: string): void {
   if (!isSafeId(id)) return
   try {
@@ -304,6 +322,8 @@ export function deletePersona(id: string): void {
   clearAvatarImage(id)
   // 绑定该角色的定时任务改由默认角色 Deva 执行（连同其独占对话），任务照常运行。
   reassignTaskPersona(id, DEFAULT_PERSONA_ID)
+  // 从技能 / MCP 的可用角色里剔除；只给它用的那些改回所有角色并停用。
+  pruneExtRoles((p) => p !== id)
   const map = enabledMap()
   if (id in map) {
     delete map[id]

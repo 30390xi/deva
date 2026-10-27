@@ -42,9 +42,10 @@ textarea {
   font-size: inherit;
 }
 
+/* 全应用统一的细滚动条：轨道 8px、滑块约 4px（透明边框 2px），悬停加深 */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
@@ -3260,19 +3261,7 @@ button.tl__line:hover {
   }
 }
 
-/* 下拉浮层的入场动画（自触发角缩放淡入）：Codex 式轻快弹出。 */
-@keyframes deva-pick-pop {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* 模型下拉的浮层外观：圆角卡片 + 细描边 + 柔和投影 + 入场动画。 */
+/* 模型下拉的浮层外观：圆角卡片 + 细描边 + 柔和投影；不加入场动画（缩放时文字重绘会抖动）。 */
 .model-pick__menu {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -3282,7 +3271,6 @@ button.tl__line:hover {
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: var(--shadow);
-  animation: deva-pick-pop 0.14s ease;
 }
 
 /* ---------- Chat：模型选择下拉 ---------- */
@@ -3296,7 +3284,6 @@ button.tl__line:hover {
 }
 .model-pick__menu {
   right: 0;
-  transform-origin: bottom right;
   /* 菜单宽度按内容自适应（min~max 之间），使最长模型名单行铺开、短名不留空。 */
   min-width: 248px;
   max-width: 360px;
@@ -3371,12 +3358,6 @@ button.tl__line:hover {
   text-align: center;
 }
 
-/* 尊重系统「减少动态效果」：关闭浮层入场动画。 */
-@media (prefers-reduced-motion: reduce) {
-  .model-pick__menu {
-    animation: none;
-  }
-}
 
 /* ---------- 设置：密钥状态 / 警告 ---------- */
 .key-status {
@@ -4763,7 +4744,6 @@ button.projmenu__item:disabled {
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: var(--shadow);
-  animation: deva-pick-pop 0.14s ease;
 }
 .model-limit__sep {
   height: 1px;
@@ -4851,11 +4831,6 @@ button.projmenu__item:disabled {
   background: color-mix(in srgb, var(--warning) 8%, transparent);
   color: var(--warning);
   font-size: 12px;
-}
-
-/* 协议下拉 */
-.select-input {
-  cursor: pointer;
 }
 
 /* 添加模型：拉取清单下拉（可搜索 / 手动输入） */
@@ -4979,6 +4954,7 @@ button.projmenu__item:disabled {
 }
 /* 详情头图标：去掉着色底盒，改扁平强调色描线（Codex 味：低装饰） */
 .ext-detail__icon {
+  flex: none;
   display: grid;
   place-items: center;
   width: 22px;
@@ -5331,6 +5307,14 @@ button.projmenu__item:disabled {
   font-family: var(--font-mono);
   font-size: 14px;
 }
+/* 名字占满标题行剩余宽度、过长显示省略号，把行尾的状态推到最右侧（MCP 详情） */
+.ext-detail__name--clip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ext-detail__scope {
   padding: 1px 6px;
   border: 1px solid var(--border);
@@ -5340,9 +5324,6 @@ button.projmenu__item:disabled {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-subtle);
-}
-.ext-detail__spacer {
-  flex: 1 1 auto;
 }
 .ext-detail__enable {
   font-size: 12px;
@@ -5420,39 +5401,14 @@ button.projmenu__item:disabled {
   line-height: 1.5;
 }
 
-.ext-select {
-  height: 32px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  font-size: 13px;
-  font-family: var(--font-sans);
-  cursor: pointer;
-}
-.ext-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-tint);
-}
-.ext-select--mono {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
 
 /* ---------- MCP 状态行：单行 mono，动作走文字按钮 ---------- */
-.ext-status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-width: 620px;
-  margin-bottom: var(--space-4);
-}
 .ext-status__live {
+  flex: none;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg-muted);
+  white-space: nowrap;
 }
 .ext-status__live--connected {
   color: var(--success);
@@ -5471,6 +5427,8 @@ button.projmenu__item:disabled {
   color: var(--warning);
 }
 .ext-linkbtn {
+  flex: none;
+  white-space: nowrap;
   padding: 2px 4px;
   border: none;
   background: transparent;
@@ -5649,10 +5607,6 @@ select.autotaskcard__input {
 :root[data-theme='dark'] .autotaskcard__input[type='time']::-webkit-calendar-picker-indicator {
   filter: invert(1); /* 原生图标本是深色，暗色主题下反相以可见 */
 }
-.autotaskcard__input:hover,
-.autotaskcard__textarea:hover {
-  border-color: var(--fg-subtle);
-}
 .autotaskcard__input:focus,
 .autotaskcard__textarea:focus {
   outline: none;
@@ -5692,23 +5646,16 @@ select.autotaskcard__input {
     border-color 0.12s ease,
     box-shadow 0.12s ease;
 }
-.sched__ctl:hover {
-  border-color: var(--fg-subtle);
-}
 .sched__ctl:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-tint);
 }
-/* 下拉：去原生外观，自绘 chevron（中性灰在明/暗主题都可读）。 */
-select.sched__ctl {
-  appearance: none;
-  -webkit-appearance: none;
-  padding-right: calc(var(--space-3) + 14px);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a94' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right var(--space-2) center;
-  cursor: pointer;
+/* 下拉框（components/Select）与同排的时间框、数字框同高同圆角。 */
+.sched {
+  --select-h: var(--control-h);
+  --select-radius: var(--radius);
+  --select-bg: var(--bg-elevated);
 }
 /* 日期/时间：保留原生选择器，仅让内置图标随主题着色、可点。 */
 .sched__ctl[type='date'],
@@ -5924,4 +5871,187 @@ select.sched__ctl {
 }
 .autotaskcard__done-text {
   font-size: 13px;
+}
+
+/* ---------- 统一下拉框（components/Select.tsx，样稿 design/select.html） ---------- */
+/* 尺寸随所在表单：--select-h / --select-radius / --select-bg 由外层给出，缺省对齐 .input / .ext-input。 */
+.select {
+  width: 100%;
+  height: var(--select-h, 32px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--select-radius, var(--radius-sm));
+  background: var(--select-bg, var(--bg-elevated));
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.select:focus-visible,
+.select.is-open {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+/* 带色点 / 图标 / 头像时左侧收窄，图形贴近边框 */
+.select:has(> .select__lead) {
+  padding-left: 8px;
+}
+.select__lead {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+.select__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select__placeholder {
+  color: var(--fg-subtle);
+}
+.select__caret {
+  flex: none;
+  color: var(--fg-subtle);
+  transition: transform 0.15s;
+}
+.select.is-open .select__caret {
+  transform: rotate(180deg);
+}
+/* 句中紧凑：按内容取宽（调用方可给最小宽度），文字占满剩余宽度，箭头固定在右侧 */
+.select--inline {
+  width: auto;
+  gap: 6px;
+}
+/* 与 .ext-input--mono 一致 */
+.select--mono .select__label,
+.select-menu--mono .select-menu__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* 选项与收起态共用的小图形 */
+.select-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.select-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-selected);
+  color: var(--accent);
+}
+.select-ava {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+.select-ava > svg,
+.select-ava > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 浮层（渲染到 body，叠在设置等弹框之上） */
+.select-menu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+.select-menu {
+  position: fixed;
+  z-index: 71;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+.select-menu--inline {
+  width: max-content;
+}
+/* 出现滚动条时去掉右内边距，行底色铺到滚动条边 */
+.select-menu.is-scroll {
+  padding-right: 0;
+}
+.select-menu__opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  cursor: pointer;
+}
+.select-menu__opt.is-active {
+  background: var(--bg-hover);
+}
+.select-menu__opt .select-icon {
+  width: 26px;
+  height: 26px;
+}
+.select-menu__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.select-menu__name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-menu__opt.has-sub .select-menu__name {
+  font-weight: 500;
+}
+.select-menu__sub {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-menu__check {
+  flex: none;
+  color: var(--accent);
+  visibility: hidden;
+}
+.select-menu__opt.is-on .select-menu__check {
+  visibility: visible;
+}
+.select-menu__sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+.select-menu__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  color: var(--fg-subtle);
 }

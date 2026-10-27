@@ -12,6 +12,7 @@ import {
 import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { unzipSync } from 'fflate'
 import { getConfig, getDevaHome, setConfig } from './config'
+import { allowsPersona, getRoles, setRoles } from './ext-roles'
 import { fmArray, fmMap, fmScalar, fmString, parseFrontmatter } from './frontmatter'
 
 /**
@@ -28,6 +29,7 @@ import { fmArray, fmMap, fmScalar, fmString, parseFrontmatter } from './frontmat
  * 运行期（chat.ts 同进程直接调用，无需 IPC）：
  * - `enabledSkillSummaries()`：把「已启用」技能的 name+description 注入系统提示词（便宜的清单段）。
  * - `loadSkillInstructionsByName()`：命中 `skill` 工具或 `/name` 显式触发时，才加载完整正文。
+ * - 两者都按对话绑定的角色过滤：技能可设为只给指定角色用（可用角色存 config.json，见 ext-roles.ts）。
  *
  * 文件读写不设路径限制：技能目录可被 read_file / write_file / 命令直接读写（多文件技能的子文档按需
  * read_file，安装可下载解压到技能目录）。技能目录有监听（`startSkillsWatcher`），渲染层的技能清单随之实时更新。
@@ -51,6 +53,8 @@ export interface SkillRecord {
   /** SKILL.md 正文 = 完整操作指令。 */
   instructions: string
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。内置技能恒为 null。见 ext-roles.ts。 */
+  roles: string[] | null
   /** 来源：`builtin` = 随应用二进制内置（不落盘、不可删/编辑、恒启用）；`custom` = 用户创建/导入。 */
   source: 'builtin' | 'custom'
 }
@@ -160,6 +164,7 @@ const BUILTIN_CREATE_SKILL: SkillRecord = {
   metadata: {},
   instructions: CREATE_SKILL_INSTRUCTIONS,
   enabled: true,
+  roles: null,
   source: 'builtin'
 }
 
@@ -196,6 +201,7 @@ const BUILTIN_CREATE_AGENT: SkillRecord = {
   metadata: {},
   instructions: CREATE_AGENT_INSTRUCTIONS,
   enabled: true,
+  roles: null,
   source: 'builtin'
 }
 
@@ -235,6 +241,7 @@ const BUILTIN_CREATE_MCP: SkillRecord = {
   metadata: {},
   instructions: CREATE_MCP_INSTRUCTIONS,
   enabled: true,
+  roles: null,
   source: 'builtin'
 }
 
@@ -313,6 +320,7 @@ function parseSkill(id: string, raw: string, enabled: boolean): SkillRecord {
     metadata: fmMap(data, 'metadata'),
     instructions: body.trim(),
     enabled,
+    roles: getRoles('skills', id),
     source: 'custom'
   }
 }
@@ -420,6 +428,7 @@ export function upsertSkill(input: SkillUpsertInput): SkillRecord {
     metadata: {},
     instructions: input.instructions ?? '',
     enabled: input.enabled !== false,
+    roles: getRoles('skills', id),
     source: 'custom'
   }
 }
@@ -444,6 +453,7 @@ export async function deleteSkill(id: string): Promise<{ ok: boolean }> {
     delete map[id]
     writeEnabledMap(map)
   }
+  setRoles('skills', id, null)
   return { ok: true }
 }
 
@@ -457,10 +467,15 @@ export function setSkillEnabled(id: string, enabled: boolean): void {
 
 // ── 运行期（chat.ts 直接调用）───────────────────────────────────────────────
 
-/** 已启用技能的 name+description 摘要，用于系统提示词注入（渐进式披露的便宜清单）。 */
-export function enabledSkillSummaries(): { name: string; description: string }[] {
+/** 技能在这个角色的对话里是否可用：已启用，且可用角色含该角色（内置技能恒可用）。 */
+function usableBy(s: SkillRecord, personaId: string): boolean {
+  return s.enabled && (s.source === 'builtin' || allowsPersona('skills', s.id, personaId))
+}
+
+/** 该角色可用技能的 name+description 摘要，随消息下发给模型（渐进式披露的便宜清单）。 */
+export function enabledSkillSummaries(personaId: string): { name: string; description: string }[] {
   return listSkills()
-    .filter((s) => s.enabled)
+    .filter((s) => usableBy(s, personaId))
     .map((s) => ({ name: s.name, description: s.description }))
 }
 
@@ -470,18 +485,19 @@ export function hasEnabledSkills(): boolean {
 }
 
 /**
- * 按显示名（大小写不敏感）加载**已启用**技能的完整正文。
+ * 按显示名（大小写不敏感）加载该角色**可用**技能的完整正文（已启用且对该角色开放）。
  * 供 `skill` 工具与 `/name` 显式触发；未命中返回 null。
  * `dir` = 自定义技能的文件夹绝对路径（内置技能不落盘，无此项）：多文件技能正文里的相对路径
  * 以它为基准，调用方须一并告知模型，否则子文档无从定位。
  */
 export function loadSkillInstructionsByName(
-  name: string
+  name: string,
+  personaId: string
 ): { name: string; instructions: string; dir?: string } | null {
   const wanted = name.trim().toLowerCase()
   if (!wanted) return null
   for (const s of listSkills()) {
-    if (!s.enabled) continue
+    if (!usableBy(s, personaId)) continue
     if (s.name.toLowerCase() === wanted || s.id.toLowerCase() === wanted) {
       return {
         name: s.name,
@@ -718,6 +734,12 @@ export function registerSkillsIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('skills:remove', (_e, id: string): Promise<{ ok: boolean }> => deleteSkill(id))
   ipcMain.handle('skills:set-enabled', (_e, id: string, enabled: boolean): { ok: true } => {
     setSkillEnabled(id, Boolean(enabled))
+    return { ok: true }
+  })
+  // 可用角色：null = 全部角色。内置技能恒对全部角色开放，不接受设置。
+  ipcMain.handle('skills:set-roles', (_e, id: string, roles: string[] | null): { ok: boolean } => {
+    if (RESERVED_IDS.has(id) || !isSafeId(id)) return { ok: false }
+    setRoles('skills', id, Array.isArray(roles) ? roles : null)
     return { ok: true }
   })
   // 上传导入：原生对话框选文件（模态） → importSkillFromFile。取消返回 { ok:false, error:'cancelled' }。

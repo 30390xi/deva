@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { getConfig, getDevaHome, setConfig } from './config'
 import { deleteSecretsByPrefix, getSecret } from './secrets'
+import { setRoles } from './ext-roles'
 
 /**
  * MCP 服务配置的读写（全局，`~/.deva/mcp.json`，与项目无关）。
@@ -240,7 +241,7 @@ export function upsertServer(input: McpServerInput): McpServerConfig {
   return { id, ...rec }
 }
 
-/** 删除一个服务：清 mcp.json 条目、启用态、以及其全部密钥（`mcp:<id>:` 前缀）。 */
+/** 删除一个服务：清 mcp.json 条目、启用态、可用角色、以及其全部密钥（`mcp:<id>:` 前缀）。 */
 export function deleteServer(id: string): void {
   if (!isSafeId(id)) return
   const servers = readAll()
@@ -253,6 +254,7 @@ export function deleteServer(id: string): void {
     delete map[id]
     writeEnabledMap(map)
   }
+  setRoles('mcp', id, null)
   void deleteSecretsByPrefix(`mcp:${id}:`)
 }
 

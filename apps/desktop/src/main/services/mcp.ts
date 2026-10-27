@@ -27,6 +27,7 @@ import {
   type McpServerInput
 } from './mcp-config'
 import { hasSecret, setSecret } from './secrets'
+import { allowsPersona, getRoles, setRoles } from './ext-roles'
 
 /**
  * MCP 主机 / 客户端管理器（全部运行于主进程）。
@@ -58,6 +59,8 @@ export type McpStatus =
 interface McpToolInfo {
   fqName: string
   origName: string
+  /** 服务自己给的工具说明（扩展页展示用；发给模型的 spec.description 另带 [MCP:服务名] 前缀）。 */
+  origDesc: string
   spec: ToolSpec
 }
 
@@ -79,6 +82,8 @@ interface Runtime {
 /** 回渲染层的合并视图（配置 + 启用态 + 运行期状态）。 */
 export interface McpServerView extends McpServerConfig {
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。见 ext-roles.ts。 */
+  roles: string[] | null
   scope: 'global'
   source: 'custom'
   status: McpStatus
@@ -151,6 +156,7 @@ function viewOf(cfg: McpServerConfig): McpServerView {
   return {
     ...cfg,
     enabled: isEnabled(cfg.id),
+    roles: getRoles('mcp', cfg.id),
     scope: 'global',
     source: 'custom',
     status: rt?.status ?? 'disconnected',
@@ -161,7 +167,7 @@ function viewOf(cfg: McpServerConfig): McpServerView {
       rt?.tools.map((t) => ({
         name: t.origName,
         fqName: t.fqName,
-        description: t.spec.description
+        description: t.origDesc
       })) ?? []
   }
 }
@@ -179,6 +185,8 @@ export function listServers(): McpServerView[] {
 
 function toSpec(cfg: McpServerConfig, fqName: string, t: Tool): ToolSpec {
   const base = (t.description ?? '').trim()
+  // 前缀给模型看：工具名里只有服务 id（如 judgments__search），用户按显示名说「用裁判文书检索查一下」时
+  // 模型靠它把工具对上服务。扩展页的「已发现工具」不展示这个前缀（见 McpToolInfo.origDesc）。
   const desc = `[MCP:${cfg.name}] ${base || t.name}`.slice(0, 1024)
   const schema =
     t.inputSchema && typeof t.inputSchema === 'object'
@@ -333,7 +341,12 @@ async function connect(id: string, cfg: McpServerConfig): Promise<boolean> {
     const tools: McpToolInfo[] = []
     for (const t of listed.tools) {
       const fqName = makeFqName(id, t.name, used)
-      tools.push({ fqName, origName: t.name, spec: toSpec(cfg, fqName, t) })
+      tools.push({
+        fqName,
+        origName: t.name,
+        origDesc: (t.description ?? '').trim(),
+        spec: toSpec(cfg, fqName, t)
+      })
     }
     rt.client = c
     rt.tools = tools
@@ -498,11 +511,15 @@ export function autoConnectEnabledServers(): void {
 
 // ── 工具分发 ────────────────────────────────────────────────────────────────
 
-/** 本轮可用的全部 MCP 工具规格（仅已连接服务贡献；供 chat.ts 每轮合并进工具表）。 */
-export function getMcpToolSpecs(): ToolSpec[] {
+/**
+ * 该角色本轮可用的 MCP 工具规格（已连接、且可用角色含该角色的服务贡献；供 chat.ts 每轮合并进工具表）。
+ * 连接与角色无关：只给某个角色用的服务照样常驻连接，只是不进其他角色的工具表。
+ */
+export function getMcpToolSpecs(personaId: string): ToolSpec[] {
   const specs: ToolSpec[] = []
-  for (const rt of runtimes.values()) {
-    if (rt.status === 'connected') for (const t of rt.tools) specs.push(t.spec)
+  for (const [id, rt] of runtimes) {
+    if (rt.status !== 'connected' || !allowsPersona('mcp', id, personaId)) continue
+    for (const t of rt.tools) specs.push(t.spec)
   }
   return specs
 }
@@ -613,6 +630,13 @@ export function registerMcpIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('mcp:remove', (_e, id: string): { ok: true } => {
     forget(id)
     deleteServer(id)
+    return { ok: true }
+  })
+  // 可用角色：null = 全部角色。只影响哪些角色的工具表里有它，不触发重连。
+  ipcMain.handle('mcp:set-roles', (_e, id: string, roles: string[] | null): { ok: boolean } => {
+    if (!getServerConfig(id)) return { ok: false }
+    setRoles('mcp', id, Array.isArray(roles) ? roles : null)
+    broadcast(id)
     return { ok: true }
   })
   // 启停即兑现：setEnabled 经配置变更通知触发对账（连上 / 断开）。

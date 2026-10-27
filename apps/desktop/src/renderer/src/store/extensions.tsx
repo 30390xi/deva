@@ -80,6 +80,11 @@ interface ExtensionsContextValue {
    * 失败由调用方提示（技能原样保留）。
    */
   removeSkill: (id: string) => Promise<boolean>
+  /**
+   * 技能 / MCP 的可用角色：角色 id 数组，null = 全部角色。只决定哪些角色的对话里能用（主进程按对话角色过滤），
+   * 不改启用态与 MCP 连接。内置技能不可设置。
+   */
+  setRoles: (kind: 'skill' | 'mcp', id: string, roles: string[] | null) => void
   /** MCP：连接失败后手动重试（状态经 onStatus 广播回流）。启用即连接，无单独的连 / 断入口。 */
   mcpRetry: (id: string) => void
   /** MCP：写入某密钥字段（空串即删除）；返回是否成功与加密是否可用（供降级提示）。 */
@@ -87,6 +92,11 @@ interface ExtensionsContextValue {
 }
 
 const ExtensionsContext = createContext<ExtensionsContextValue | null>(null)
+
+/** 可用角色是否含该角色（null = 全部角色）。与主进程 ext-roles.ts 的 allowsPersona 同义。 */
+export function rolesAllow(roles: string[] | null, personaId: string): boolean {
+  return roles === null || roles.includes(personaId)
+}
 
 /** SkillRecord（主进程）→ 渲染层 Skill（desc 别名 + 来源徽标字段）。 */
 function recToSkill(rec: SkillRecord): Skill {
@@ -102,7 +112,8 @@ function recToSkill(rec: SkillRecord): Skill {
     instructions: rec.instructions,
     scope: 'global',
     source: rec.source ?? 'custom',
-    enabled: rec.enabled
+    enabled: rec.enabled,
+    roles: rec.roles ?? null
   }
 }
 
@@ -161,7 +172,7 @@ function mapFromKv(rows: McpKV[]): Record<string, McpValue> {
 /** 配置公共字段 → 渲染层（不含运行期）。 */
 function baseFromConfig(c: McpServerConfig): Omit<
   McpServer,
-  'enabled' | 'status' | 'toolCount' | 'lastError' | 'missingSecrets' | 'tools'
+  'enabled' | 'roles' | 'status' | 'toolCount' | 'lastError' | 'missingSecrets' | 'tools'
 > {
   return {
     id: c.id,
@@ -183,6 +194,7 @@ function viewToMcp(v: McpServerView): McpServer {
   return {
     ...baseFromConfig(v),
     enabled: v.enabled,
+    roles: v.roles ?? null,
     status: v.status,
     toolCount: v.toolCount,
     lastError: v.lastError,
@@ -196,6 +208,7 @@ function configToMcp(c: McpServerConfig, enabled = false): McpServer {
   return {
     ...baseFromConfig(c),
     enabled,
+    roles: null,
     status: 'disconnected',
     toolCount: 0,
     lastError: null,
@@ -265,6 +278,7 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
         next[idx] = {
           ...next[idx],
           enabled: view.enabled,
+          roles: view.roles ?? null,
           status: view.status,
           toolCount: view.toolCount,
           lastError: view.lastError,
@@ -518,7 +532,12 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
         setterFor(kind)((list) => list.filter((it) => it.id !== id))
         setSelected((cur) => (cur && cur.kind === kind && cur.id === id ? null : cur))
         if (kind === 'mcp') void window.deva?.mcp?.remove(id).catch(() => {})
-        else void window.deva?.personas?.remove(id).catch(() => {})
+        // 删角色后主进程会改写技能 / MCP 的可用角色（只给它用的改回所有角色并停用），重拉一次。
+        else
+          void window.deva?.personas
+            ?.remove(id)
+            .then(refresh)
+            .catch(() => {})
       },
       add: (kind) => {
         // 技能的「+」即上传导入（无手写空建）；MCP / Agent 提示词为可编辑空建。
@@ -531,6 +550,16 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
       setPersonaAvatarImage,
       importSkill,
       removeSkill,
+      setRoles: (kind, id, roles) => {
+        if (kind === 'skill') {
+          if (skills.find((s) => s.id === id)?.source === 'builtin') return
+          setSkills((list) => list.map((s) => (s.id === id ? { ...s, roles } : s)))
+          void window.deva?.skills?.setRoles(id, roles).catch(() => {})
+        } else {
+          setMcp((list) => list.map((m) => (m.id === id ? { ...m, roles } : m)))
+          void window.deva?.mcp?.setRoles(id, roles).catch(() => {})
+        }
+      },
       mcpRetry: (id) => void window.deva?.mcp?.retry(id).catch(() => {}),
       mcpSetSecret: async (id, field, value) => {
         try {

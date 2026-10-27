@@ -13,11 +13,13 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  Pencil
+  Pencil,
+  Wrench
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import { useModels } from '../../store/models'
 import { useDialog } from '../../components/DialogProvider'
+import { Select } from '../../components/Select'
 import {
   seedProviders,
   providerPresets,
@@ -451,18 +453,28 @@ export function ModelSettings(): React.JSX.Element {
             <div className="field">
               <label className="field__label">{t('models.selectProvider')}</label>
               <div className="field__control">
-                <select
-                  className="input select-input"
+                <Select
+                  aria-label={t('models.selectProvider')}
                   value={presetSel}
-                  onChange={(e) => void onPickPreset(e.target.value)}
-                >
-                  <option value="">{t('models.presetCustomOption')}</option>
-                  {providerPresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(id) => void onPickPreset(id)}
+                  items={[
+                    {
+                      value: '',
+                      label: t('models.presetCustomOption'),
+                      lead: (
+                        <span className="select-icon">
+                          <Wrench size={13} />
+                        </span>
+                      )
+                    },
+                    { separator: true },
+                    ...providerPresets.map((p) => ({
+                      value: p.id,
+                      label: p.name,
+                      lead: <span className="select-dot" style={{ background: p.accent }} />
+                    }))
+                  ]}
+                />
               </div>
             </div>
           )}
@@ -472,19 +484,16 @@ export function ModelSettings(): React.JSX.Element {
             <div className="field">
               <label className="field__label">{t('models.adapter')}</label>
               <div className="field__control">
-                <select
-                  className="input select-input"
+                <Select<ProviderAdapter>
+                  aria-label={t('models.adapter')}
                   value={selectedProvider.adapter}
-                  onChange={(e) =>
-                    updateProvider(selectedProvider.id, {
-                      adapter: e.target.value as ProviderAdapter
-                    })
-                  }
-                >
-                  <option value="openai">{t('models.adapterOpenAI')}</option>
-                  <option value="responses">{t('models.adapterResponses')}</option>
-                  <option value="anthropic">{t('models.adapterAnthropic')}</option>
-                </select>
+                  onChange={(adapter) => updateProvider(selectedProvider.id, { adapter })}
+                  items={[
+                    { value: 'openai', label: t('models.adapterOpenAI'), sub: t('models.adapterSub.openai') },
+                    { value: 'responses', label: t('models.adapterResponses'), sub: t('models.adapterSub.responses') },
+                    { value: 'anthropic', label: t('models.adapterAnthropic'), sub: t('models.adapterSub.anthropic') }
+                  ]}
+                />
               </div>
             </div>
           )}

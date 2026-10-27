@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../i18n/i18n'
+import { Select } from '../../components/Select'
 import type { TaskSchedule } from '../../../../preload'
 import { buildCron, localDatetimeValue, normalizeDows, parseRecur, type ScheduleMode } from './schedule'
 
@@ -17,10 +18,19 @@ import { buildCron, localDatetimeValue, normalizeDows, parseRecur, type Schedule
 /** 星期展示序：周一…周日（对齐 1.png）；值为 cron dow（0=周日）。 */
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const WEEK_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-const MINUTES = Array.from({ length: 60 }, (_, i) => i)
-const MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
-
 const pad2 = (n: number): string => String(n).padStart(2, '0')
+const MINUTE_ITEMS = Array.from({ length: 60 }, (_, i) => ({ value: i, label: pad2(i) }))
+const MODES: ScheduleMode[] = ['everyN', 'hourly', 'daily', 'weekly', 'monthly', 'once', 'custom']
+/** 模式下拉的文案键（「不重复」沿用 schedOnce）。 */
+const MODE_KEYS: Record<ScheduleMode, string> = {
+  everyN: 'tasks.recurEveryN',
+  hourly: 'tasks.recurHourly',
+  daily: 'tasks.recurDaily',
+  weekly: 'tasks.recurWeekly',
+  monthly: 'tasks.recurMonthly',
+  once: 'tasks.schedOnce',
+  custom: 'tasks.recurCustom'
+}
 
 export function ScheduleEditor({
   initial,
@@ -87,19 +97,13 @@ export function ScheduleEditor({
   return (
     <div className="sched">
       <div className="sched__row">
-        <select
-          className="sched__ctl sched__mode"
+        <Select
+          inline
+          className="sched__mode"
           value={mode}
-          onChange={(e) => setMode(e.target.value as ScheduleMode)}
-        >
-          <option value="everyN">{t('tasks.recurEveryN')}</option>
-          <option value="hourly">{t('tasks.recurHourly')}</option>
-          <option value="daily">{t('tasks.recurDaily')}</option>
-          <option value="weekly">{t('tasks.recurWeekly')}</option>
-          <option value="monthly">{t('tasks.recurMonthly')}</option>
-          <option value="once">{t('tasks.schedOnce')}</option>
-          <option value="custom">{t('tasks.recurCustom')}</option>
-        </select>
+          onChange={setMode}
+          items={MODES.map((m) => ({ value: m, label: t(MODE_KEYS[m]) }))}
+        />
 
         {mode === 'everyN' && (
           <>
@@ -116,33 +120,29 @@ export function ScheduleEditor({
 
         {mode === 'hourly' && (
           <>
-            <select
-              className="sched__ctl sched__pick"
+            <Select
+              inline
+              mono
+              className="sched__pick"
               value={hourlyMin}
-              onChange={(e) => setHourlyMin(parseInt(e.target.value, 10) || 0)}
-            >
-              {MINUTES.map((n) => (
-                <option key={n} value={n}>
-                  {pad2(n)}
-                </option>
-              ))}
-            </select>
+              onChange={setHourlyMin}
+              items={MINUTE_ITEMS}
+            />
             <span className="sched__unit">{t('tasks.unitMinute')}</span>
           </>
         )}
 
         {mode === 'monthly' && (
-          <select
-            className="sched__ctl sched__pick sched__pick--dom"
+          <Select
+            inline
+            className="sched__pick sched__pick--dom"
             value={dom}
-            onChange={(e) => setDom(parseInt(e.target.value, 10) || 1)}
-          >
-            {MONTH_DAYS.map((n) => (
-              <option key={n} value={n}>
-                {t('tasks.monthDay').replace('{n}', String(n))}
-              </option>
-            ))}
-          </select>
+            onChange={setDom}
+            items={Array.from({ length: 31 }, (_, i) => ({
+              value: i + 1,
+              label: t('tasks.monthDay').replace('{n}', String(i + 1))
+            }))}
+          />
         )}
 
         {mode === 'once' && (

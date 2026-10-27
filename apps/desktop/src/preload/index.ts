@@ -326,6 +326,8 @@ export interface SkillRecord {
   metadata: Record<string, string>
   instructions: string
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。内置技能恒为 null。 */
+  roles: string[] | null
   /** 来源：`builtin` = 应用内置（不可删/编辑、恒启用）；`custom` = 用户创建/导入。 */
   source: 'builtin' | 'custom'
 }
@@ -441,6 +443,8 @@ export interface McpServerInput {
 /** 回渲染层的合并视图（配置 + 启用态 + 运行期状态）。 */
 export interface McpServerView extends McpServerConfig {
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。 */
+  roles: string[] | null
   scope: 'global'
   source: 'custom'
   status: McpStatus
@@ -841,6 +845,9 @@ const api = {
     remove: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('skills:remove', id),
     setEnabled: (id: string, enabled: boolean): Promise<{ ok: true }> =>
       ipcRenderer.invoke('skills:set-enabled', id, enabled),
+    /** 设置可用角色（角色 id 数组；null = 全部角色）。内置技能不可设置。 */
+    setRoles: (id: string, roles: string[] | null): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('skills:set-roles', id, roles),
     /** 订阅 skills:changed（技能目录变化后推送的全表），返回取消订阅函数（仿 tasks.onChanged）。 */
     onChanged: (cb: (skills: SkillRecord[]) => void): (() => void) => {
       const listener = (_e: unknown, skills: SkillRecord[]): void => cb(skills)
@@ -903,6 +910,9 @@ const api = {
     remove: (id: string): Promise<{ ok: true }> => ipcRenderer.invoke('mcp:remove', id),
     setEnabled: (id: string, enabled: boolean): Promise<{ ok: true }> =>
       ipcRenderer.invoke('mcp:set-enabled', id, enabled),
+    /** 设置可用角色（角色 id 数组；null = 全部角色）。只影响哪些角色的对话里能用，不重连。 */
+    setRoles: (id: string, roles: string[] | null): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('mcp:set-roles', id, roles),
     /** 连接失败后手动重试（按当前配置重新对账），返回最新视图。 */
     retry: (id: string): Promise<McpServerView | null> => ipcRenderer.invoke('mcp:retry', id),
     /** 写入某服务的某密钥字段（空串即删除；明文永不回渲染层）。 */

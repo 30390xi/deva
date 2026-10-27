@@ -137,6 +137,11 @@ const zhCN: MessageTree = {
     license: '许可',
     properties: '属性',
     transport: '传输方式',
+    transportSub: {
+      stdio: '启动本地进程，经标准输入输出通信',
+      sse: '连接远程 SSE 服务',
+      http: '连接远程 Streamable HTTP 服务'
+    },
     command: '启动命令',
     commandPlaceholder: '如 npx、node、python…',
     url: '服务地址',
@@ -188,7 +193,12 @@ const zhCN: MessageTree = {
     importErrNoSkillMd: '压缩包内未找到 SKILL.md（应位于根目录，或唯一的顶层目录下）。',
     importErrUnsafe: '压缩包包含不安全的文件路径，已拒绝导入。',
     importErrTooLarge: '技能包体积或文件数超过上限，已拒绝导入。',
-    importErrGeneric: '无法读取该文件，请确认它是有效的 .zip 技能包或 SKILL.md。'
+    importErrGeneric: '无法读取该文件，请确认它是有效的 .zip 技能包或 SKILL.md。',
+    roles: '可用角色',
+    rolesGeneral: '所有角色',
+    rolesGeneralHint: '包括后续新建的角色',
+    rolesOnly: '只给这些角色',
+    rolesSummary: '{names}等 {n} 个角色'
   },
   chat: {
     role: { user: '我', agent: 'Deva' },
@@ -456,9 +466,6 @@ const zhCN: MessageTree = {
       customName: '自定义服务',
       host: '接口地址',
       protocol: '接口类型',
-      protoOpenai: 'OpenAI 兼容（大多数服务）',
-      protoResponses: 'OpenAI Responses（较新的 OpenAI 接口）',
-      protoAnthropic: 'Anthropic（Claude）',
       apiKey: 'API 密钥',
       ollamaStep1: '下载并安装 Ollama，然后打开它',
       ollamaStep2: '在 Ollama 里下载至少一个模型',
@@ -702,6 +709,11 @@ const zhCN: MessageTree = {
     adapterOpenAI: 'OpenAI 兼容',
     adapterResponses: 'OpenAI Responses',
     adapterAnthropic: 'Anthropic',
+    adapterSub: {
+      openai: '/chat/completions，大多数服务使用',
+      responses: '/responses，OpenAI 较新的接口',
+      anthropic: '/v1/messages，Claude 及兼容服务'
+    },
     resetHost: '恢复默认',
     deleteProvider: '删除服务商',
     deleteProviderConfirm: '删除该自定义服务商及其密钥？此操作不可撤销。',
@@ -870,6 +882,7 @@ const zhCN: MessageTree = {
     localUser: '本机用户',
     settings: '设置',
     defaultModel: '跟随默认',
+    defaultModelHint: '使用最近一次选择的模型',
     viewProfile: '查看资料',
     mountHint: '挂载一个文件夹，让当前对话聚焦其中',
     unmountHint: '卸载文件夹，回到全机通用助手',
@@ -1022,7 +1035,9 @@ const zhCN: MessageTree = {
     cancel: '取消',
     attachSkipped: '以下文件类型不支持或过大，未添加：{names}',
     save: '保存',
-    prefModel: '偏好模型',
+    profileTabChats: '对话',
+    profileTabCaps: '能力',
+    capDisabled: '已停用',
     startChat: '开始对话',
     quickStartTitle: '快速开启对话',
     quickStartHint: '选择一个角色，点头像即可直接开始',
@@ -1241,6 +1256,11 @@ const en: MessageTree = {
     license: 'License',
     properties: 'Properties',
     transport: 'Transport',
+    transportSub: {
+      stdio: 'Starts a local process and communicates over standard I/O',
+      sse: 'Connects to a remote SSE server',
+      http: 'Connects to a remote Streamable HTTP server'
+    },
     command: 'Command',
     commandPlaceholder: 'e.g. npx, node, python…',
     url: 'URL',
@@ -1292,7 +1312,12 @@ const en: MessageTree = {
     importErrNoSkillMd: 'No SKILL.md found in the archive (it must be at the root or under a single top-level folder).',
     importErrUnsafe: 'The archive contains an unsafe file path; import was rejected.',
     importErrTooLarge: 'The skill package exceeds the size or file-count limit; import was rejected.',
-    importErrGeneric: 'Could not read the file. Make sure it is a valid .zip skill package or SKILL.md.'
+    importErrGeneric: 'Could not read the file. Make sure it is a valid .zip skill package or SKILL.md.',
+    roles: 'Available to',
+    rolesGeneral: 'All personas',
+    rolesGeneralHint: 'Including personas created later',
+    rolesOnly: 'Only these personas',
+    rolesSummary: '{names} and {rest} more'
   },
   chat: {
     role: { user: 'You', agent: 'Deva' },
@@ -1550,9 +1575,6 @@ const en: MessageTree = {
       customName: 'Custom service',
       host: 'API address',
       protocol: 'API type',
-      protoOpenai: 'OpenAI-compatible (most services)',
-      protoResponses: 'OpenAI Responses (newer OpenAI API)',
-      protoAnthropic: 'Anthropic (Claude)',
       apiKey: 'API key',
       ollamaStep1: 'Download and install Ollama, then open it',
       ollamaStep2: 'Download at least one model in Ollama',
@@ -1807,6 +1829,11 @@ const en: MessageTree = {
     adapterOpenAI: 'OpenAI-compatible',
     adapterResponses: 'OpenAI Responses',
     adapterAnthropic: 'Anthropic',
+    adapterSub: {
+      openai: '/chat/completions, used by most services',
+      responses: '/responses, the newer OpenAI API',
+      anthropic: '/v1/messages, Claude and compatible services'
+    },
     resetHost: 'Reset',
     deleteProvider: 'Delete provider',
     deleteProviderConfirm: 'Delete this custom provider and its key? This cannot be undone.',
@@ -1979,6 +2006,7 @@ const en: MessageTree = {
     localUser: 'Local user',
     settings: 'Settings',
     defaultModel: 'Follow default',
+    defaultModelHint: 'Uses the most recently selected model',
     viewProfile: 'View profile',
     mountHint: 'Mount a folder to focus this conversation inside it',
     unmountHint: 'Unmount the folder and return to the whole-machine assistant',
@@ -2128,7 +2156,9 @@ const en: MessageTree = {
     cancel: 'Cancel',
     attachSkipped: 'Skipped unsupported or oversized files: {names}',
     save: 'Save',
-    prefModel: 'Preferred model',
+    profileTabChats: 'Chats',
+    profileTabCaps: 'Capabilities',
+    capDisabled: 'Disabled',
     startChat: 'Start chat',
     quickStartTitle: 'Start a conversation',
     quickStartHint: 'Pick a persona — tap its avatar to begin',

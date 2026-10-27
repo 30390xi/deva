@@ -31,6 +31,8 @@ export interface Skill {
   scope: ExtScope
   source: ExtSource
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。内置技能恒为 null。 */
+  roles: string[] | null
 }
 
 export type McpTransport = 'stdio' | 'sse' | 'http'
@@ -79,6 +81,8 @@ export interface McpServer {
   scope: ExtScope
   source: ExtSource
   enabled: boolean
+  /** 可用角色（角色 id）；null = 全部角色。只决定哪些角色的对话里有它的工具，连接与角色无关。 */
+  roles: string[] | null
   /** ↓ 运行期（来自 deva.mcp.list / onStatus，不落盘） */
   status: McpStatus
   /** 已发现工具数 */

@@ -1737,14 +1737,14 @@ const PARALLEL_READ_TOOLS = new Set([
  * 子智能体本轮可用工具集：内置工具（排除 ask_user / skill / run_subagent 等交互与创建类）为基。
  * - `tools === '*'`（通用子智能体）→ 全部内置工具，对标 Claude Code general-purpose 的 `*`。
  * - 否则 → 仅白名单命中的内置工具（如 Explore / Plan 的只读集：不给 write_file / edit_file）。
- * **已连接的 MCP 工具两种情况都全量附加**：MCP 是外部能力面，把它挡在外面只会逼主智能体自己去干
- * 那些本该外包的活；其写入风险与 run_command 同源。
+ * **本角色可用的已连接 MCP 工具两种情况都全量附加**：MCP 是外部能力面，把它挡在外面只会逼主智能体自己去干
+ * 那些本该外包的活；其写入风险与 run_command 同源。子智能体替主对话的角色干活，能力面跟随该角色。
  * 工具集只**收窄**可见工具；被保留的每个调用仍照常过同一道权限闸门（无提权）。
  */
-function buildSubagentTools(def: SubagentDef): ToolSpec[] {
+function buildSubagentTools(def: SubagentDef, personaId: string): ToolSpec[] {
   // create_* / propose_agent 在 toolSpecs 基表里，须显式剔除；memory_read 保留（只读无害）。
   const builtins = toolSpecs.filter((t) => !SUBAGENT_EXCLUDED.has(t.name))
-  const mcp = getMcpToolSpecs()
+  const mcp = getMcpToolSpecs(personaId)
   if (def.tools === '*') return [...builtins, ...mcp]
   const allow = new Set(def.tools)
   return [...builtins.filter((t) => allow.has(t.name)), ...mcp]
@@ -1756,10 +1756,10 @@ function buildSubagentTools(def: SubagentDef): ToolSpec[] {
  *   create_skill/propose_agent/create_mcp/create_task 不得在自动执行中创建持久实体；
  *   exit_plan 无用户可批准计划）后**全部保留**（read/write/exec 均在），不再有白名单收窄。
  * - **追加** `skill` 工具（技能加载 headless-安全，用户明确要求「包含 skill」；清单同样随消息下发）与
- *   **全部已连接 MCP 工具**（用户明确要求「包含 mcp」）。
+ *   **执行角色可用的全部已连接 MCP 工具**（用户明确要求「包含 mcp」）。
  * - 每个保留的调用仍经 sealedDecision（读写与命令不设限，仅排除交互/创建类工具）。
  */
-function buildSealedTools(): ToolSpec[] {
+function buildSealedTools(personaId: string): ToolSpec[] {
   const EXCLUDED = new Set([
     'ask_user',
     'run_subagent',
@@ -1773,7 +1773,7 @@ function buildSealedTools(): ToolSpec[] {
     'memory_delete'
   ])
   const builtins = toolSpecs.filter((t) => !EXCLUDED.has(t.name))
-  return [...builtins, buildSkillTool(), ...getMcpToolSpecs()]
+  return [...builtins, buildSkillTool(), ...getMcpToolSpecs(personaId)]
 }
 
 /**
@@ -1895,6 +1895,11 @@ interface AgentLoopArgs {
   system: string
   /** 本轮可用工具表（内置 + 动态 skill / MCP / run_subagent）。 */
   tools: ToolSpec[]
+  /**
+   * 本对话的角色（未绑定 = 默认角色）：技能清单、skill 工具与新派子智能体的 MCP 工具表都只取对该角色开放的
+   * （见 ext-roles.ts）。子智能体跟随父轮。
+   */
+  personaId: string
   /** 模型配置（adapter / provider / baseURL / model）。 */
   model: ChatModelConfig
   /** 思考等级（缺省 = 'default'，不发思考参数）。子智能体跟随父轮。 */
@@ -2143,6 +2148,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       history,
       system,
       tools,
+      personaId,
       model,
       effort,
       ctx,
@@ -2203,7 +2209,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           toolIds: [tc.id],
           workspaceRoot: ctx.workspaceRoot,
           system: fork ? system : buildSubagentSystem(def, ctx.workspaceRoot),
-          tools: fork ? tools : buildSubagentTools(def),
+          tools: fork ? tools : buildSubagentTools(def, personaId),
           // 普通子智能体只带本次任务描述，不继承父对话（避免上下文串味与预算膨胀）。
           messages: fork ? buildForkHistory(history, tc.id, prompt) : [{ role: 'user', content: prompt }],
           createdAt: now,
@@ -2273,6 +2279,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           history: rec.messages,
           system: rec.system,
           tools: rec.tools,
+          personaId,
           // 子智能体恒跟随主对话（继承本轮模型与思考等级）。
           model,
           effort,
@@ -2513,6 +2520,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // fork 虽共享主对话的历史与工具表，但 depth>0，且它的历史里已带着主对话附过的清单；普通子智能体本就不看记忆。
     const listsSkills = depth === 0 && tools.some((t) => t.name === 'skill')
     const listsMemory = depth === 0
+    const offeredTools = new Set(tools.map((t) => t.name))
 
     for (let step = 0; step < maxSteps; step++) {
       // 轮中压缩：第 2 步起每步请求前检查（第 1 步之前调用方已在轮开头查过）。此刻上一步的工具
@@ -2561,7 +2569,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         // 技能或记忆有变化（含轮内刚装的技能、别的对话或面板改的记忆、轮中挂载带来的项目记忆）、或压缩 / 删轮
         // 抹掉了先前的告知 → 把差异附在本次请求才首发的末条消息上。每次（含重发）现算：已告知过即无事，故幂等；
         // 压缩自愈后的重发也能补上被摘要掉的清单。
-        if (listsSkills) attachListing(history, (h) => skillListingPart(h, enabledSkillSummaries()))
+        if (listsSkills) attachListing(history, (h) => skillListingPart(h, enabledSkillSummaries(personaId)))
         if (listsMemory) attachListing(history, (h) => memoryListingPart(h, ctx.workspaceRoot))
 
         for await (const ev of streamChat(
@@ -3001,11 +3009,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         if (tc.name === 'skill') {
           const a = (tc.args ?? {}) as { name?: unknown }
           const wanted = typeof a.name === 'string' ? a.name.trim() : ''
-          const found = wanted ? loadSkillInstructionsByName(wanted) : null
+          const found = wanted ? loadSkillInstructionsByName(wanted, personaId) : null
           const content = found
             ? `已加载技能「${found.name}」，请严格据此指令完成用户任务：\n\n${skillDirNote(found.dir)}${found.instructions}`
-            : `未找到名为「${wanted}」的已启用技能。当前可用技能：${
-                enabledSkillSummaries().map((s) => s.name).join('、') || '（无）'
+            : `未找到名为「${wanted}」的可用技能。当前可用技能：${
+                enabledSkillSummaries(personaId).map((s) => s.name).join('、') || '（无）'
               }。`
           const skillSummary = found ? `已加载技能「${found.name}」` : '未找到该技能'
           args.onToolSummary?.(tc.id, skillSummary)
@@ -3139,11 +3147,19 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         }
 
         // MCP 工具走连接管理器（callTool + 超时 + 取消，结果恒作数据）；内置工具走本地执行器。
+        // MCP 只认本轮工具表里有的：路由表里有所有已连接服务的工具，只给别的角色用的不能被模型凭名字调到
+        // （历史里可能留着可用范围收窄之前的调用）。
         const prefetched = readRuns.get(tc.id)
         const res: ToolResult = prefetched
           ? await prefetched
           : isMcpTool(tc.name)
-            ? await dispatchMcpTool(tc.name, tc.args, ctx.signal)
+            ? offeredTools.has(tc.name)
+              ? await dispatchMcpTool(tc.name, tc.args, ctx.signal)
+              : {
+                  content: `MCP 工具「${tc.name}」在当前对话中不可用（没有提供给这个角色，或服务已断开），不要再调用。`,
+                  summary: '工具不可用',
+                  isError: true
+                }
             : await executeTool(tc.name, tc.args, ctx)
         if (recorder) {
           try {
@@ -3304,6 +3320,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // 提前解析，以便压缩按本轮实际模型的上下文窗口判定/摘要。
     // 注：persona 仍需取出用于系统提示词单身份注入，但**不再**参与模型选择（快照已固定于会话）。
     const persona = session.personaId ? getPersona(session.personaId) : null
+    // 决定本轮能用哪些技能 / MCP 的角色（未绑定 = 默认角色）。
+    const rolePersonaId = session.personaId || DEFAULT_PERSONA_ID
     const turnModel = resolveModelRef(session.model, config)
 
     // 自动压缩：接近上下文窗口时，先把较早历史摘要替换，再进入本轮（一轮进行中另有逐步检查，见 compact）。
@@ -3400,8 +3418,8 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     // run_subagent 恒提供：内置子智能体（通用 / Explore / Plan）枚举进工具描述，无需任何用户配置。
     const subagentTool = buildSubagentTool()
     // 每轮定格：内置工具 + exit_plan（计划先行）+ skill（描述固定，技能清单随消息下发）+
-    // run_subagent / send_to_subagent + 当前已连接 MCP 工具。exit_plan 仅主轮提供（子智能体的 buildSubagentTools 不含它）。
-    // 角色不再收窄工具可见性：所有角色均可按需调用全部工具（每个调用仍照常过同一道权限闸门，零提权）。
+    // run_subagent / send_to_subagent + 当前已连接、对本角色开放的 MCP 工具。exit_plan 仅主轮提供（子智能体的 buildSubagentTools 不含它）。
+    // 内置工具不按角色收窄：所有角色均可按需调用（每个调用仍照常过同一道权限闸门，零提权）；按角色收窄的只有技能与 MCP。
     const turnTools: ToolSpec[] = [
       ...toolSpecs,
       buildPlanTool(),
@@ -3409,7 +3427,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       buildSkillTool(),
       subagentTool,
       buildSendToSubagentTool(),
-      ...getMcpToolSpecs()
+      ...getMcpToolSpecs(rolePersonaId)
     ]
 
     try {
@@ -3427,6 +3445,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
           projectDocPromptSection(loadProjectDoc(effectiveRoot))
         ),
         tools: turnTools,
+        personaId: rolePersonaId,
         model: turnModel,
         effort: session.effort,
         ctx,
@@ -3612,9 +3631,10 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       pruneCheckpoints(session)
     }
 
-    // 密封工具集：除交互/创建类外全量放开（read/write/exec + skill + 全部已连接 MCP）；
+    // 密封工具集：除交互/创建类外全量放开（read/write/exec + skill + 执行角色可用的已连接 MCP）；
     // 每次调用仍经 sealedDecision（仅排除交互/创建类工具）。
-    const sealedTools = buildSealedTools()
+    const rolePersonaId = persona?.id ?? DEFAULT_PERSONA_ID
+    const sealedTools = buildSealedTools(rolePersonaId)
 
     let lastInput = 0
     let lastCacheRead = 0
@@ -3633,6 +3653,7 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
         history,
         system: sealedSystemPrompt(effectiveRoot, personas, memoryPromptSection({ writable: false, root: effectiveRoot })),
         tools: sealedTools,
+        personaId: rolePersonaId,
         model: turnModel,
         ctx,
         controller,
@@ -3708,12 +3729,12 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
     if (!busySessions.has(sessionId)) repairDanglingToolUses(session)
     const history = session.messages
 
-    // 「/技能名」显式触发：命中已启用技能 → 剥离该 token，把完整正文预置进本条消息（这一轮即生效）。
+    // 「/技能名」显式触发：命中本对话角色可用的技能 → 剥离该 token，把完整正文预置进本条消息（这一轮即生效）。
     // 未命中则原样保留（用户可能只是打了个斜杠），不做任何处理。
     let effectiveText = text
     const slashMatch = /^\/([A-Za-z0-9_-]+)[ \t]*([\s\S]*)$/.exec(text.trim())
     if (slashMatch) {
-      const loaded = loadSkillInstructionsByName(slashMatch[1])
+      const loaded = loadSkillInstructionsByName(slashMatch[1], session.personaId || DEFAULT_PERSONA_ID)
       if (loaded) {
         const rest = slashMatch[2].trim()
         effectiveText =

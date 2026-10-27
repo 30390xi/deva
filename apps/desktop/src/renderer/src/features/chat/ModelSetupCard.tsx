@@ -13,6 +13,7 @@ import { useI18n } from '../../i18n/i18n'
 import { useModels } from '../../store/models'
 import { useChat } from '../../store/chat'
 import { useToast } from '../../components/ToastProvider'
+import { Select } from '../../components/Select'
 
 /**
  * 对话区「接入模型」引导卡：一个可用模型都没有时（首次安装的常态）显示在对话区，三步完成配置——
@@ -363,18 +364,19 @@ export function ModelSetupCard(): React.JSX.Element {
                   onChange={(e) => setHost(e.target.value)}
                 />
               </label>
-              <label className="setup__field">
+              <div className="setup__field">
                 <span className="setup__label">{t('chat.setup.protocol')}</span>
-                <select
-                  className="input select-input"
+                <Select<Adapter>
+                  aria-label={t('chat.setup.protocol')}
                   value={adapter}
-                  onChange={(e) => setAdapter(e.target.value as Adapter)}
-                >
-                  <option value="openai">{t('chat.setup.protoOpenai')}</option>
-                  <option value="responses">{t('chat.setup.protoResponses')}</option>
-                  <option value="anthropic">{t('chat.setup.protoAnthropic')}</option>
-                </select>
-              </label>
+                  onChange={setAdapter}
+                  items={[
+                    { value: 'openai', label: t('models.adapterOpenAI'), sub: t('models.adapterSub.openai') },
+                    { value: 'responses', label: t('models.adapterResponses'), sub: t('models.adapterSub.responses') },
+                    { value: 'anthropic', label: t('models.adapterAnthropic'), sub: t('models.adapterSub.anthropic') }
+                  ]}
+                />
+              </div>
             </>
           ) : (
             <>
