@@ -25,22 +25,13 @@ function isBlockCode(className: string, children: ReactNode): boolean {
   return typeof children === 'string' && children.includes('\n')
 }
 
-/** DeepSeek 式代码块：顶部「语言名 + 复制」条 + 高亮正文（横向可滚）。 */
-function CodeBlock({
-  lang,
-  codeClassName,
-  children
-}: {
-  lang?: string
-  codeClassName: string
-  children: ReactNode
-}): React.JSX.Element {
+/** 代码块表头的「复制」按钮：复制成功后 1.5 秒内显示「已复制」。时间轴上展开的命令框同用。 */
+export function CopyButton({ getText }: { getText: () => string }): React.JSX.Element {
   const { t } = useI18n()
-  const codeRef = useRef<HTMLElement>(null)
   const [copied, setCopied] = useState(false)
 
   const copy = (): void => {
-    const txt = codeRef.current?.textContent ?? ''
+    const txt = getText()
     if (!txt) return
     void navigator.clipboard
       .writeText(txt)
@@ -52,13 +43,30 @@ function CodeBlock({
   }
 
   return (
+    <button type="button" className="md-code__copy" onClick={copy}>
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? t('chat.md.copied') : t('chat.md.copy')}
+    </button>
+  )
+}
+
+/** DeepSeek 式代码块：顶部「语言名 + 复制」条 + 高亮正文（横向可滚）。 */
+function CodeBlock({
+  lang,
+  codeClassName,
+  children
+}: {
+  lang?: string
+  codeClassName: string
+  children: ReactNode
+}): React.JSX.Element {
+  const codeRef = useRef<HTMLElement>(null)
+
+  return (
     <div className="md-code">
       <div className="md-code__head">
         <span className="md-code__lang">{lang || 'text'}</span>
-        <button type="button" className="md-code__copy" onClick={copy}>
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? t('chat.md.copied') : t('chat.md.copy')}
-        </button>
+        <CopyButton getText={() => codeRef.current?.textContent ?? ''} />
       </div>
       <pre className="md-code__body">
         <code ref={codeRef} className={codeClassName}>

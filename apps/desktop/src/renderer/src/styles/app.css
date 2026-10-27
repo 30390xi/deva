@@ -1324,6 +1324,25 @@ button.tl__line:hover {
 .tl__text > * + * {
   margin-left: 6px;
 }
+/* 工具调用行：动词与结果说明不收缩，放不下时只省略对象（长命令 / 长路径），失败原因不会被挤出行外 */
+.tl__text--tool {
+  display: flex;
+  align-items: center;
+}
+.tl__text--tool > * {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl__text--tool > .tl__obj {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* 结果说明很长（少见）时最多占六成，自身省略 */
+.tl__text--tool > .tl__extra {
+  max-width: 60%;
+}
 .tl__verb {
   font-weight: 500;
 }
@@ -1336,10 +1355,6 @@ button.tl__line:hover {
 .tl__extra {
   font-size: 12.5px;
   color: var(--fg-subtle);
-}
-.tl__err {
-  font-size: 12.5px;
-  color: var(--danger);
 }
 .tl__tag {
   font-size: 12px;
@@ -1447,6 +1462,27 @@ button.tl__line:hover {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.6em);
   mask-image: linear-gradient(to bottom, transparent 0, #000 1.6em);
 }
+/*
+ * 命令展开后的完整命令：外框与表头沿用 Markdown 代码块（.md-code），表头右侧是复制；
+ * 正文保留换行、长行折行（不会横向滚动），超过 10 行在框内纵向滚动，表头不随之滚走。
+ */
+.tl__cmd {
+  margin: var(--space-1) 0;
+}
+.tl__cmd-body {
+  margin: 0;
+  padding: 6px var(--space-3);
+  max-height: calc(12px * 1.5 * 10 + 12px);
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-ligatures: none;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 /* 已作答提问展开后的逐题回述：问题弱一档，答案在下 */
 .tl__qa {
   display: flex;
@@ -1526,17 +1562,15 @@ button.tl__line:hover {
   color: var(--danger);
 }
 .tl__task {
-  margin-bottom: var(--space-1);
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--fg-subtle);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.tl__empty {
-  font-size: 12.5px;
-  line-height: 24px;
-  color: var(--fg-subtle);
+/* 执行中下面跟着内部步骤才留间距；完成后只剩任务 */
+.tl__task:not(:last-child) {
+  margin-bottom: var(--space-1);
 }
 @media (prefers-reduced-motion: reduce) {
   .tl__shimmer {

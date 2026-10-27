@@ -37,7 +37,7 @@ import {
 } from 'lucide-react'
 import { useI18n } from '../../i18n/i18n'
 import type { ChatBlock, ChatMessage, StreamStatus, ToolStatus } from '../../store/chat'
-import { Markdown } from './Markdown'
+import { CopyButton, Markdown } from './Markdown'
 import { HumationFace } from '../../components/humation'
 import { TaskConfirmCard } from './TaskConfirmCard'
 import { DeliverablesCard } from './DeliverablesCard'
@@ -1095,6 +1095,21 @@ const isFailed = (status: ToolStatus): boolean => status === 'error' || status =
 /** 不算原因的失败摘要（主进程旧版兜底写的就是它，旧对话里还存着）：照「没有原因」处理，只显示「失败」。 */
 const GENERIC_FAILURES = new Set(['失败', 'failed', 'Failed'])
 
+/** 失败 / 拒绝时写在行尾的原因；没有具体原因时为「失败」。未失败返回 null。 */
+function failReason(step: ToolStep, t: (key: string) => string): string | null {
+  if (!isFailed(step.status)) return null
+  if (step.status === 'denied') return t('chat.status.denied')
+  return step.summary && !GENERIC_FAILURES.has(step.summary) ? step.summary : t('chat.flow.failed')
+}
+
+/** 行上的悬停提示：完整对象（命令 / 路径），失败时另起一行附上原因。 */
+function stepTitle(step: ToolStep, t: (key: string) => string): string | undefined {
+  const full = flowObject(step.name, step.args)?.full
+  const reason = failReason(step, t)
+  if (!reason) return full
+  return full ? `${full}\n${reason}` : reason
+}
+
 /** 节点图标：执行中转圈、失败打叉，其余按工具类型（未知工具为扳手）。 */
 function stepIcon(step: ToolStep, size: number): React.JSX.Element {
   if (step.status === 'running') return <Loader2 size={size} className="spin" />
@@ -1104,35 +1119,31 @@ function stepIcon(step: ToolStep, size: number): React.JSX.Element {
 }
 
 /**
- * 一次工具调用的文字：动词 + 对象 + 结果说明（单行省略，完整对象挂在外层的悬停上）。
- * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝用红字直接写原因——红色叉号图标
- * 已表明失败，不再加「失败：」前缀；没有具体原因时才写「失败」。
+ * 一次工具调用的文字：动词 + 对象 + 结果说明（单行，完整对象挂在外层的悬停上）。
+ * 成功不做标记（只补一句有信息量的摘要），执行中动词扫光，失败 / 拒绝在行尾用灰字写原因（同子智能体被停止）——
+ * 红色叉号图标已表明失败，原因不必抢眼：出错后模型多半会自己改了重跑。不加「失败：」前缀，没有具体原因时才写「失败」。
+ * 放不下时只省略对象（长命令 / 长路径），结果说明保持完整——否则失败原因总被挤出行外。
  * 时间轴与后台任务面板（每个后台子智能体的当前步骤）共用。
  */
 export function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
   const { t } = useI18n()
   const key = verbKey(step.name)
   const obj = flowObject(step.name, step.args)
+  const reason = failReason(step, t)
   let verb: React.JSX.Element
   let tail: React.JSX.Element | null = null
   if (step.status === 'running') {
     verb = <span className="tl__shimmer">{t(`chat.flow.doing.${key}`)}</span>
-  } else if (isFailed(step.status)) {
+  } else if (reason) {
     verb = <span className="tl__verb">{t(`chat.flow.base.${key}`)}</span>
-    const reason =
-      step.status === 'denied'
-        ? t('chat.status.denied')
-        : step.summary && !GENERIC_FAILURES.has(step.summary)
-          ? step.summary
-          : t('chat.flow.failed')
-    tail = <span className="tl__err">{reason}</span>
+    tail = <span className="tl__extra">{reason}</span>
   } else {
     verb = <span className="tl__verb">{t(`chat.flow.done.${key}`)}</span>
     if (step.summary && !QUIET_SUMMARIES.has(step.summary))
       tail = <span className="tl__extra">{step.summary}</span>
   }
   return (
-    <span className="tl__text">
+    <span className="tl__text tl__text--tool">
       {verb}
       {obj && <code className="tl__obj">{obj.text}</code>}
       {tail}
@@ -1140,16 +1151,49 @@ export function ToolText({ step }: { step: ToolStep }): React.JSX.Element {
   )
 }
 
-/** 时间轴上的工具调用节点：图标节点 + 一行文字。 */
+/**
+ * 时间轴上的工具调用节点：图标节点 + 一行文字。
+ * 命令可以点开看完整命令（行里放不下、多行命令被压成一行）：样式同 Markdown 代码块，表头只有复制按钮——
+ * 失败原因已写在行尾；能点开看，就不再挂悬停提示。其余工具只有一行，完整对象挂在悬停上。
+ */
 function TimelineTool({ step }: { step: ToolStep }): React.JSX.Element {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
   const state = step.status === 'running' ? ' is-run' : isFailed(step.status) ? ' is-err' : ''
+  const command = step.name === 'run_command' ? flowObject(step.name, step.args)?.full : undefined
+  if (!command)
+    return (
+      <li className={`tl__item${state}`}>
+        <span className="tl__node">{stepIcon(step, 14)}</span>
+        <div className="tl__main">
+          <div className="tl__line" title={stepTitle(step, t)}>
+            <ToolText step={step} />
+          </div>
+        </div>
+      </li>
+    )
   return (
-    <li className={`tl__item${state}`}>
+    <li className={`tl__item${state}${open ? ' is-open' : ''}`}>
       <span className="tl__node">{stepIcon(step, 14)}</span>
       <div className="tl__main">
-        <div className="tl__line" title={flowObject(step.name, step.args)?.full}>
+        <button
+          type="button"
+          className="tl__line"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
           <ToolText step={step} />
-        </div>
+          <ChevronRight size={12} className="tl__caret" />
+        </button>
+        {open && (
+          <div className="tl__body md-code tl__cmd">
+            <div className="md-code__head">
+              <span className="md-code__lang">shell</span>
+              <CopyButton getText={() => command} />
+            </div>
+            <pre className="tl__cmd-body">{command}</pre>
+          </div>
+        )}
       </div>
     </li>
   )
@@ -1674,8 +1718,9 @@ export function subagentTitle(
 }
 
 /**
- * 时间轴上的子智能体节点（可展开）：「子智能体任务 + 标题」+ 后台标记 + 内部步数；执行中转圈、扫光，
- * 失败节点变红并写明原因。展开后看任务描述与内部工具调用（每步一行，带小图标）。
+ * 时间轴上的子智能体节点（可展开）：「子智能体任务 + 标题」+ 后台标记；执行中转圈、扫光，失败节点变红并写明原因。
+ * 内部工具调用只在执行中显示（标题行带步数，展开后每步一行、带小图标）：它们不落盘，重载后就没了，
+ * 故完成后一律只显示派发的任务，免得同一张卡重载前后两个样。
  * 后台运行的停止键不在这里，在输入框上方的后台任务胶囊里（BackgroundCapsule）。
  * 子智能体的权限请求不在此节点内——照常作为顶层权限卡浮出确认（见 reduceBlocks）。
  */
@@ -1684,11 +1729,17 @@ function TimelineSubagent({ block }: { block: Extract<ChatBlock, { kind: 'subage
   const [open, setOpen] = useState(false)
   const name = subagentTitle(block, t)
   const label = t(block.continued ? 'chat.subagent.continuedTitle' : 'chat.subagent.title')
-  const count = block.children.length
   const running = block.status === 'running'
+  const steps = running ? block.children : []
+  // 完成的瞬间（running: true→false）自动收起一次：步骤列表随之消失，不留着一张只剩任务的展开卡。
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (wasRunning.current && !running) setOpen(false)
+    wasRunning.current = running
+  }, [running])
   // 结局摘要（主进程定稿的中文）：早期版本带「子智能体「名称」」前缀，节点上紧挨着名称，剥掉免得重复。
   const outcome = block.summary?.replace(/^子智能体「[^」]*」/, '')
-  // 用户亲手停的（后台「已停止」/ 前台「已中止」）不是出错：灰字写明结局，节点不标红。
+  // 用户亲手停的（后台「已停止」/ 前台「已中止」）不是出错：节点不标红。结局与失败原因一样用灰字写在行尾。
   const stopped = isFailed(block.status) && STOPPED_SUMMARIES.has(outcome ?? '')
   const failed = isFailed(block.status) && !stopped
   return (
@@ -1707,14 +1758,14 @@ function TimelineSubagent({ block }: { block: Extract<ChatBlock, { kind: 'subage
             <span className={running ? 'tl__shimmer' : 'tl__verb'}>{label}</span>
             <span>{name}</span>
             {block.background && <span className="tl__tag">{t('chat.subagent.background')}</span>}
-            {count > 0 && (
+            {steps.length > 0 && (
               <span className="tl__extra">
-                {count} {t('chat.subagent.stepUnit')}
+                {steps.length} {t('chat.subagent.stepUnit')}
               </span>
             )}
             {stopped && <span className="tl__extra">{outcome}</span>}
             {failed && (
-              <span className="tl__err">
+              <span className="tl__extra">
                 {block.status === 'denied' ? t('chat.status.denied') : outcome || t('chat.status.failed')}
               </span>
             )}
@@ -1724,20 +1775,16 @@ function TimelineSubagent({ block }: { block: Extract<ChatBlock, { kind: 'subage
         {open && (
           <div className="tl__body">
             {block.task && <div className="tl__task">{block.task}</div>}
-            {count === 0 ? (
-              <div className="tl__empty">{t('chat.subagent.noSteps')}</div>
-            ) : (
-              block.children.map((c) => (
-                <div
-                  key={c.id}
-                  className={`tl__sub${isFailed(c.status) ? ' is-err' : c.status === 'running' ? ' is-run' : ''}`}
-                  title={flowObject(c.name, c.args)?.full}
-                >
-                  <span className="tl__sub-icon">{stepIcon(c, 12)}</span>
-                  <ToolText step={c} />
-                </div>
-              ))
-            )}
+            {steps.map((c) => (
+              <div
+                key={c.id}
+                className={`tl__sub${isFailed(c.status) ? ' is-err' : c.status === 'running' ? ' is-run' : ''}`}
+                title={stepTitle(c, t)}
+              >
+                <span className="tl__sub-icon">{stepIcon(c, 12)}</span>
+                <ToolText step={c} />
+              </div>
+            ))}
           </div>
         )}
       </div>

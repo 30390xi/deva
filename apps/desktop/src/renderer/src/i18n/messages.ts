@@ -296,7 +296,6 @@ const zhCN: MessageTree = {
       fallback: 'General',
       fork: '分身',
       stepUnit: '步',
-      noSteps: '无内部工具调用',
       // run_in_background：派发它的那轮不等它，结束后自动通知主智能体。
       background: '后台',
       stop: '停止',
@@ -1401,7 +1400,6 @@ const en: MessageTree = {
       fallback: 'General',
       fork: 'Fork',
       stepUnit: 'steps',
-      noSteps: 'No internal tool calls',
       background: 'Background',
       stop: 'Stop',
       stopHint: 'Stop this background subagent (its output so far goes to the main agent with your next message)',

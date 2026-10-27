@@ -1828,8 +1828,7 @@ body.cf-resizing-y * {
   color: var(--fg-subtle);
 }
 .cf-bg__step .tl__obj,
-.cf-bg__step .tl__extra,
-.cf-bg__step .tl__err {
+.cf-bg__step .tl__extra {
   font-size: 11.5px;
 }
 .cf-todo__now {
