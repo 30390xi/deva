@@ -1802,9 +1802,10 @@ button.tl__line:hover {
     border-color 0.15s ease,
     background 0.15s ease;
 }
+/* 悬停用主题色浅底而非灰底：与提问卡、定时任务卡同一色系。 */
 .agentcard.is-clickable:hover {
   border-color: var(--accent);
-  background: var(--bg-hover);
+  background: var(--accent-tint);
 }
 .agentcard.is-clickable:focus-visible {
   outline: 2px solid var(--accent);
@@ -2086,6 +2087,43 @@ button.tl__line:hover {
 .ask__option-desc {
   font-size: 12px;
   color: var(--fg-muted);
+}
+/* 「自己输入」选中后原地变输入框：编辑时白底 + 主题色边框 + 聚焦光圈（同 .input:focus），离开后同其他选中项。
+   行高取 normal，与未选中时的 button 一致，切换时这一行不跳。 */
+.ask__option--custom {
+  line-height: normal;
+  cursor: text;
+}
+.ask__option--custom:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+}
+.ask__option--custom:focus-within {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+.ask__option--custom .ask__option-mark {
+  cursor: pointer;
+}
+/* 行内文本框：无边框透明，随内容自动增高（长答案换行而非横向滚动）。 */
+.ask__inline {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  field-sizing: content;
+  background: transparent;
+  color: var(--fg);
+  font-weight: 500;
+  line-height: inherit;
+}
+.ask__inline::placeholder {
+  color: var(--fg-subtle);
+  font-weight: 400;
 }
 /* 可跳过题的说明：告知用户可留空。 */
 .ask__optional {

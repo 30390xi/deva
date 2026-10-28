@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Square,
   Sparkles,
@@ -793,7 +793,7 @@ function AskCard({
     }
   }
 
-  // 点「自己输入」项：展开/收起输入框。单选时与真候选项互斥（清空 picks）；收起时清空已输文本。
+  // 点「自己输入」项：选中即原地变输入框，点前面的勾取消。单选时与真候选项互斥（清空 picks）；取消时清空已输文本。
   const toggleCustom = (qi: number): void => {
     if (answered) return
     const q = questions[qi]
@@ -806,7 +806,26 @@ function AskCard({
     })
   }
 
-  // 有候选项时，输入框仅在选中「自己输入」后显示；纯自由题（无候选项）恒显示。
+  // 留空点到别处即退回未选中，不留一个空的选中项；切走窗口时 document 已失焦，不算。
+  const onInlineBlur = (qi: number): void => {
+    setTimeout(() => {
+      if (!document.hasFocus()) return
+      setDrafts((prev) =>
+        prev.map((d, i) =>
+          i === qi && d.customOn && !d.custom.trim() ? { ...d, customOn: false, custom: '' } : d
+        )
+      )
+    }, 0)
+  }
+
+  // 行内输入框挂载即聚焦、光标放末尾（回到已填过的题接着写）；引用稳定，只在挂载时调用。
+  const focusInline = useCallback((el: HTMLTextAreaElement | null): void => {
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+
+  // 有候选项时，输入框仅在选中「自己输入」后显示（就在该行原地）；纯自由题（无候选项）恒显示。
   const inputShown = (qi: number): boolean =>
     questions[qi].options.length === 0 || drafts[qi].customOn
 
@@ -857,7 +876,18 @@ function AskCard({
     )
   }
 
-  // 单题作答区（候选项 + 「自己输入」项 + 展开后的输入框）：单题模式与向导模式共用。
+  // 自由输入回车：向导非末题前进（须本题已答）；单题或末题提交（须全答）。回车不换行。
+  const onCustomKeyDown = (e: React.KeyboardEvent, qi: number): void => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    if (multiQ && qi < last) {
+      if (isDone(qi)) goStep(qi + 1)
+    } else if (allDone) {
+      submit()
+    }
+  }
+
+  // 单题作答区（候选项 + 「自己输入」项 / 纯自由题的输入框）：单题模式与向导模式共用。
   const renderBody = (qi: number): React.JSX.Element => {
     const q = questions[qi]
     const hasOptions = q.options.length > 0
@@ -888,42 +918,56 @@ function AskCard({
                 </button>
               )
             })}
-            {/* 「自己输入」项：点选后才展开输入框（对齐 Claude Code 的 Other，避免每题常驻文本框）。 */}
-            <button
-              type="button"
-              className={`ask__option${d.customOn ? ' is-on' : ''}`}
-              onClick={() => toggleCustom(qi)}
-            >
-              <CustomIcon size={15} className="ask__option-mark" />
-              <span className="ask__option-body">
-                <span className="ask__option-label">{t('chat.ask.customOption')}</span>
-              </span>
-            </button>
+            {/* 「自己输入」项：选中后这一行原地变成输入框（对齐 Claude Code 的 Other），不另起文本框。 */}
+            {d.customOn ? (
+              <div
+                className="ask__option ask__option--custom is-on"
+                // 点行内空白也落到文本框；拦下默认行为，免得先失焦触发「留空退回」。
+                onMouseDown={(e) => {
+                  if (e.target instanceof HTMLTextAreaElement) return
+                  e.preventDefault()
+                  e.currentTarget.querySelector('textarea')?.focus()
+                }}
+              >
+                <CustomIcon
+                  size={15}
+                  className="ask__option-mark"
+                  onClick={() => toggleCustom(qi)}
+                />
+                <span className="ask__option-body">
+                  <textarea
+                    // 向导换题时重新挂载，以便聚焦并把光标放到末尾。
+                    key={qi}
+                    ref={focusInline}
+                    className="ask__inline"
+                    rows={1}
+                    value={d.custom}
+                    placeholder={t('chat.ask.customPlaceholder')}
+                    onChange={(e) => patchDraft(qi, { custom: e.target.value })}
+                    onKeyDown={(e) => onCustomKeyDown(e, qi)}
+                    onBlur={() => onInlineBlur(qi)}
+                  />
+                </span>
+              </div>
+            ) : (
+              <button type="button" className="ask__option" onClick={() => toggleCustom(qi)}>
+                <CustomIcon size={15} className="ask__option-mark" />
+                <span className="ask__option-body">
+                  <span className="ask__option-label">{t('chat.ask.customOption')}</span>
+                </span>
+              </button>
+            )}
           </div>
         )}
-        {inputShown(qi) && (
+        {!hasOptions && (
           <div className="ask__custom">
             <Pencil size={13} className="ask__custom-icon" />
             <input
               className="ask__custom-input"
               value={d.custom}
               placeholder={t('chat.ask.customPlaceholder')}
-              // 有候选项时输入框是「点开自己输入」才出现的，自动聚焦；纯自由题恒显示则不抢焦点。
-              autoFocus={hasOptions}
               onChange={(e) => patchDraft(qi, { custom: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
-                // 向导非末题：回车前进（须本题已答）；单题或末题：回车提交（须全答）。
-                if (multiQ && qi < last) {
-                  if (isDone(qi)) {
-                    e.preventDefault()
-                    goStep(qi + 1)
-                  }
-                } else if (allDone) {
-                  e.preventDefault()
-                  submit()
-                }
-              }}
+              onKeyDown={(e) => onCustomKeyDown(e, qi)}
             />
           </div>
         )}
@@ -1078,7 +1122,15 @@ function AskCard({
  * 成功时不必再写出的结果摘要：动词已经说明了结果（主进程给的摘要是中文定稿，这里按原文比对）。
  * 命令以退出码 0 结束是常态，同样不写；非 0 退出码主进程会标成失败，照常显示。
  */
-const QUIET_SUMMARIES = new Set(['已编辑', '已写入', '退出码 0'])
+const QUIET_SUMMARIES = new Set([
+  '已编辑',
+  '已写入',
+  '退出码 0',
+  '已记住',
+  '已删除',
+  '已创建技能',
+  '已创建 MCP 服务'
+])
 
 /** 子智能体被用户亲手停下的结局摘要（后台「已停止」/ 前台「已中止」）：不当作出错展示。 */
 const STOPPED_SUMMARIES = new Set(['已停止', '已中止'])
