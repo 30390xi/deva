@@ -164,6 +164,7 @@ export const toolSpecs: ToolSpec[] = [
     description:
       '执行一条 shell 命令并返回标准输出/错误与退出码（非交互、一次性）。用于构建、测试、git、脚本等。' +
       '查找文件、搜索内容、阅读文件请用专用工具 glob / grep / read_file / list_dir，不要用 find、grep、cat、ls、head 之类的 shell 命令代替。' +
+      '修改文件请用 edit_file，写文件请用 write_file，不要用 sed、awk、echo 重定向代替；除非用户明确要求，或已确认专用工具做不到。专用工具的改动用户能直接看到，也能用检查点回滚。' +
       (process.platform === 'win32'
         ? '命令在 bash 中运行（优先使用 Git Bash，请写 POSIX/bash 命令；若本机未装 Git Bash 则回落到 cmd.exe，此时请改用 Windows 命令）。'
         : '命令在 bash/sh 中运行，请写 POSIX/bash 命令。') +
@@ -646,6 +647,30 @@ export function looksBinary(buf: Buffer): boolean {
   const n = Math.min(buf.length, 8000)
   for (let i = 0; i < n; i++) if (buf[i] === 0) return true
   return false
+}
+
+/** \r\n、孤立 \r（老式 Mac）统一为 \n。 */
+function normEol(s: string): string {
+  return s.replace(/\r\n|\r/g, '\n')
+}
+
+/** 文件的主导换行风格：CRLF 行数不少于纯 LF 行数即视为 CRLF；无换行按 LF。 */
+function dominantEol(text: string): '\r\n' | '\n' {
+  const crlf = (text.match(/\r\n/g) || []).length
+  const lfOnly = (text.match(/\n/g) || []).length - crlf
+  return crlf > 0 && crlf >= lfOnly ? '\r\n' : '\n'
+}
+
+/** 文件是否以 UTF-8 BOM 开头（只读前 3 字节）；不存在或读不了按否。 */
+async function hasUtf8Bom(abs: string): Promise<boolean> {
+  const fh = await fs.open(abs, 'r').catch(() => null)
+  if (!fh) return false
+  try {
+    const { buffer, bytesRead } = await fh.read(Buffer.alloc(3), 0, 3, 0)
+    return bytesRead === 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+  } finally {
+    await fh.close()
+  }
 }
 
 /**
@@ -1533,15 +1558,21 @@ export async function executeTool(
     if (name === 'write_file') {
       const abs = resolvePath(ctx.workspaceRoot, a.path)
       const content = typeof a.content === 'string' ? a.content : ''
-      const bytes = Buffer.byteLength(content, 'utf8')
       // 父目录不存在时先自动创建，免得模型还得先 run_command mkdir。
       await fs.mkdir(dirname(abs), { recursive: true })
       if (a.append === true) {
-        await fs.appendFile(abs, content, 'utf8')
-        return { content: `已追加 ${bytes} 字节`, summary: '已追加' }
+        // 追加段按已有文件的主导换行写入，免得 CRLF 文件尾部混进 LF 行。
+        const prev = await fs.readFile(abs, 'utf8').catch(() => '')
+        const body = dominantEol(prev) === '\r\n' ? normEol(content).replace(/\n/g, '\r\n') : content
+        await fs.appendFile(abs, body, 'utf8')
+        return { content: `已追加 ${Buffer.byteLength(body, 'utf8')} 字节`, summary: '已追加' }
       }
-      await fs.writeFile(abs, content, 'utf8')
-      return { content: `已写入 ${bytes} 字节`, summary: '已写入' }
+      // 原文件带 UTF-8 BOM 而新内容没有时补回（对标 CC Write）：丢了 BOM，Windows PowerShell 5.1
+      // 等会按 ANSI 读文件，中文变乱码。
+      const out =
+        content !== '' && !content.startsWith('\uFEFF') && (await hasUtf8Bom(abs)) ? '\uFEFF' + content : content
+      await fs.writeFile(abs, out, 'utf8')
+      return { content: `已写入 ${Buffer.byteLength(out, 'utf8')} 字节`, summary: '已写入' }
     }
 
     if (name === 'edit_file') {
@@ -1573,11 +1604,13 @@ export async function executeTool(
       // ② 精确落空时，退回「换行规范化」匹配：把文件与 old/new 的 \r\n、孤立 \r 统一为 \n 再比对。
       //    这修复了「用户/模型从 read_file 的干净显示复制 old_string，在 CRLF 文件上必然匹配失败」的问题
       //    （read_file 现返回不含 \r 的行内容，old_string 天然无 \r，而磁盘文件是 \r\n）。
-      const normEol = (s: string): string => s.replace(/\r\n|\r/g, '\n')
+      // new_string 一律按文件主导换行写入：单行 old_string 在 CRLF 文件上也能精确命中，
+      // 不转换的话模型写的多行 new_string 会以 LF 插入，与其余 CRLF 行混在一起。
+      const eol = dominantEol(text)
       let count = countOcc(text, oldStr)
       let workText = text
       let workOld = oldStr
-      let workNew = newStr
+      let workNew = normEol(newStr).replace(/\n/g, eol)
       let normalized = false
       if (count === 0) {
         const tN = normEol(text)
@@ -1608,11 +1641,14 @@ export async function executeTool(
       let result = workText.split(workOld).join(workNew)
       // 规范化匹配后需还原文件的主导换行风格：CRLF 主导则把 \n 复原为 \r\n（保「CRLF 文件换行保留」）。
       // 纯 LF / 纯 CRLF 文件均可无损往返；仅极少见的混合换行文件会被统一（此路径本就是精确匹配失败的兜底）。
-      if (normalized) {
-        const crlf = (text.match(/\r\n/g) || []).length
-        const lfOnly = (text.match(/\n/g) || []).length - crlf
-        if (crlf > 0 && crlf >= lfOnly) result = result.replace(/\n/g, '\r\n')
-      }
+      if (normalized && eol === '\r\n') result = result.replace(/\n/g, '\r\n')
+      // old/new 只差换行符时，按文件风格写入后与原文相同——如实报无变化，不谎称已替换。
+      if (result === text)
+        return {
+          content: 'old_string 与 new_string 仅换行符不同；换行符跟随文件原有风格，文件无变化',
+          summary: '无变化',
+          isError: true
+        }
       await fs.writeFile(abs, result, 'utf8')
       const n = replaceAll ? count : 1
       const note = normalized ? '（已按换行规范匹配）' : ''
