@@ -96,7 +96,7 @@ export interface McpServer {
 }
 
 /**
- * Agent 提示词（Persona）：对话优先外壳里的**完整身份**——name/头像/专长/开场白/
+ * Agent 提示词（Persona）：对话优先外壳里的**完整身份**——name/头像/专长/
  * 偏好模型/提示词。旧壳仅用 name+prompt（叠加注入），新增字段可选、缺省安全。
  * 无工具白名单：角色不收窄工具，全部工具按需可用。
  */
@@ -111,8 +111,6 @@ export interface Persona {
    * 是否存在图片文件派生，不随 upsert 写回——改图走 store 的 setPersonaAvatarImage / clear。
    */
   avatarImage: string
-  /** 开场白 / 口头禅。 */
-  tagline: string
   /** 偏好模型引用 `"providerId:modelId"`；空串 = 跟随主对话默认。 */
   model: string
   /** 提示词正文（追加进主智能体系统提示词）。 */

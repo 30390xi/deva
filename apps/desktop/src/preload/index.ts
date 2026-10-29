@@ -353,8 +353,6 @@ export interface PersonaRecord {
    * 图片文件，不入 upsert 入参——改图走 setAvatarImage / clearAvatarImage。
    */
   avatarImage: string
-  /** 开场白 / 口头禅。 */
-  tagline: string
   /** 偏好模型引用 `"providerId:modelId"`；空串 = 跟随主对话默认。 */
   model: string
   /** 正文 = 追加进主智能体系统提示词的内容。 */
@@ -395,7 +393,6 @@ export interface PersonaUpsertInput {
   name: string
   description?: string
   avatar?: string
-  tagline?: string
   model?: string
   prompt?: string
   enabled?: boolean

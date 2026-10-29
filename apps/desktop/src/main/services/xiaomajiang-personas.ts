@@ -289,7 +289,6 @@ const XIAOMAJIANG = {
     name: '小码酱',
     avatar: "{\"selections\":{\"head\":\"hm1-p-000018\",\"body\":\"hm1-p-000025\",\"bottom\":\"hm1-p-000038\",\"item\":\"hm1-p-000042\",\"glasses\":\"hm1-p-000056\"},\"colors\":{\"stroke\":\"000000\",\"hair\":\"000000\",\"skin\":\"F7DFBB\",\"clothes\":\"F20202\",\"bottom\":\"000000\"},\"background\":\"3AD9C7\"}",
     description: '擅长红队/安全研究与逆向工程，兼顾全栈开发与深度技术。',
-    tagline: '有什么我能帮上忙的？',
     enabled: true,
     prompt: PROMPT
 }

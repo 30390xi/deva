@@ -969,14 +969,11 @@ function Rail({
       )
     })
   }, [sessions, personas, q])
-  // 角色列表按检索词过滤（角色名 + 简介 + 开场白，均大小写不敏感）；空词返回全部。
+  // 角色列表按检索词过滤（角色名 + 简介，均大小写不敏感）；空词返回全部。
   const shownPersonas = useMemo(() => {
     if (!q) return personas
     return personas.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.desc.toLowerCase().includes(q) ||
-        p.tagline.toLowerCase().includes(q)
+      (p) => p.name.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q)
     )
   }, [personas, q])
 
@@ -4866,7 +4863,7 @@ function EffortPicker(): React.JSX.Element | null {
 type ProfileTab = 'chats' | 'caps'
 
 /**
- * 角色资料卡：头像与名字并排、开场白引言、操作按钮，下面用「对话 / 能力」两个标签切换，一次只看一块。
+ * 角色资料卡：头像与名字并排、操作按钮，下面用「对话 / 能力」两个标签切换，一次只看一块。
  * 能力 = 在扩展页指定给这个角色的技能与 MCP（对所有角色开放的不在这里重复），点某项进入设置 › 扩展的详情；
  * 没有专属能力的角色不显示「能力」标签。标签选择跨角色保留，便于逐个查看各角色的能力。
  * 名片（头像到标签）固定不动，只有下方列表滚动。
@@ -4948,7 +4945,6 @@ function ProfileView({
               )}
             </div>
           </div>
-          {persona.tagline && <div className="cf-phead__quote">{persona.tagline}</div>}
 
           <div className="cf-profile__actions">
             <button className="cf-profile__new" onClick={onStart}>

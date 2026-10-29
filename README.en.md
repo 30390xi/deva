@@ -112,17 +112,6 @@ The system rules never prescribe identity or style, and personas never touch too
 - **One persona per conversation**, chosen when the conversation is created. Unbound conversations, or those whose persona was deleted, fall back to the default persona Deva.
 - **Personas do not restrict built-in tools**; every persona can use all of them. Skills and MCP servers can be limited to specific personas to give a persona its own capabilities; without a limit they are available to all.
 - **Subagents do not receive the persona**, so persona style does not leak into search and research results.
-- Personas are stored as Markdown files that can be edited directly or kept under version control:
-
-```markdown
----
-name: Code Reviewer
-description: Reviews changes for correctness, maintainability and security risks
-tagline: Send me the changes to review
-model: deepseek:deepseek-chat
----
-You are a senior code reviewer. List issues by severity, each with location, reason and a suggested fix...
-```
 
 Built-in personas:
 

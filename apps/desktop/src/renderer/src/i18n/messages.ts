@@ -1113,7 +1113,6 @@ const zhCN: MessageTree = {
       background: '背景色'
     },
     fSpecialty: '专长',
-    fTagline: '开场白',
     fModel: '偏好模型',
     fPrompt: '系统提示词',
     extEmpty: '暂无扩展',
@@ -2238,7 +2237,6 @@ const en: MessageTree = {
       background: 'Background'
     },
     fSpecialty: 'Specialty',
-    fTagline: 'Tagline',
     fModel: 'Preferred model',
     fPrompt: 'System prompt',
     extEmpty: 'No extensions',

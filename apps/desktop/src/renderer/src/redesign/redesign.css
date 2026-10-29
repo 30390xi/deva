@@ -2798,14 +2798,6 @@ body.cf-resizing-y * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 开场白：左侧竖线引言 */
-.cf-phead__quote {
-  margin-top: 14px;
-  padding-left: 12px;
-  border-left: 2px solid var(--border-strong);
-  font-size: 13px;
-  color: var(--fg-muted);
-}
 .cf-ptabs {
   flex: none;
   display: flex;

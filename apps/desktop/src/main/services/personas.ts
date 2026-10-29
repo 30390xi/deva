@@ -62,8 +62,6 @@ export interface PersonaRecord {
    * chat.ts 取角色）恒为空串——否则每轮对话都要把所有头像读盘 + base64 一遍，纯属白做功。
    */
   avatarImage: string
-  /** 开场白 / 口头禅。 */
-  tagline: string
   /** 偏好模型引用 `"providerId:modelId"`；空串 = 跟随主对话默认（见 model-resolve.ts）。 */
   model: string
   /** .md 正文 = 要追加进系统提示词的内容。 */
@@ -77,7 +75,6 @@ export interface PersonaUpsertInput {
   name: string
   description?: string
   avatar?: string
-  tagline?: string
   model?: string
   prompt?: string
   /** 可选：一并设置启用态（新建默认关）。 */
@@ -177,7 +174,6 @@ function parsePersona(id: string, raw: string, enabled: boolean, withImage: bool
     description: fmString(data, 'description'),
     avatar: fmString(data, 'avatar'),
     avatarImage: withImage ? readAvatarImage(id) : '',
-    tagline: fmString(data, 'tagline'),
     model: fmString(data, 'model'),
     prompt: body.trim(),
     enabled
@@ -239,7 +235,6 @@ function composePersonaMd(input: {
   name: string
   description: string
   avatar: string
-  tagline: string
   model: string
   prompt: string
 }): string {
@@ -247,7 +242,6 @@ function composePersonaMd(input: {
   if (input.description) lines.push(`description: ${fmScalar(input.description)}`)
   // avatar 为 JSON 字符串（含引号/大括号），必须经 fmScalar 引号化 + 转义，方能安全存进 YAML 单行。
   if (input.avatar) lines.push(`avatar: ${fmScalar(input.avatar)}`)
-  if (input.tagline) lines.push(`tagline: ${fmScalar(input.tagline)}`)
   if (input.model) lines.push(`model: ${fmScalar(input.model)}`)
   lines.push('---', '', input.prompt.trim(), '')
   return lines.join('\n')
@@ -264,7 +258,6 @@ export function upsertPersona(input: PersonaUpsertInput): PersonaRecord {
     name,
     description: (input.description ?? '').trim(),
     avatar: (input.avatar ?? '').trim(),
-    tagline: (input.tagline ?? '').trim(),
     model: (input.model ?? '').trim(),
     prompt: input.prompt ?? ''
   })
@@ -288,7 +281,6 @@ export function upsertPersona(input: PersonaUpsertInput): PersonaRecord {
       description: (input.description ?? '').trim(),
       avatar: (input.avatar ?? '').trim(),
       avatarImage: readAvatarImage(id),
-      tagline: (input.tagline ?? '').trim(),
       model: (input.model ?? '').trim(),
       prompt: input.prompt ?? '',
       enabled: input.enabled === true
@@ -416,7 +408,6 @@ export function ensureSeededPersonas(): void {
       description: def.description,
       // avatar 省略 → 由 id 确定性生成一枚稳定 Humation 头像（用户可在编辑器改）。
       avatar: def.avatar ?? '',
-      tagline: def.tagline,
       model: def.model ?? '',
       prompt: def.prompt,
       enabled: def.enabled
