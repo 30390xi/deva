@@ -56,7 +56,7 @@ interface ExtensionsContextValue {
   toggle: (kind: ExtKind, id: string) => void
   update: (kind: ExtKind, id: string, patch: ExtPatch) => void
   remove: (kind: ExtKind, id: string) => void
-  add: (kind: ExtKind) => void
+  add: (kind: Exclude<ExtKind, 'mcp'>) => void
   /**
    * Persona 直存：整对象 round-trip 到 personas:upsert（→ composePersonaMd）后按 id 增量替换本地列表，
    * 返回落库映射后的 Persona（供角色编辑器「保存即建/改」的确定性路径，避免多次 update 拆分写）。
@@ -198,20 +198,6 @@ function viewToMcp(v: McpServerView): McpServer {
     lastError: v.lastError,
     missingSecrets: v.missingSecrets ?? [],
     tools: v.tools
-  }
-}
-
-/** McpServerConfig（新建返回，无运行期）→ 渲染层 McpServer（运行期取默认）。 */
-function configToMcp(c: McpServerConfig, enabled = false): McpServer {
-  return {
-    ...baseFromConfig(c),
-    enabled,
-    roles: null,
-    status: 'disconnected',
-    toolCount: 0,
-    lastError: null,
-    missingSecrets: [],
-    tools: []
   }
 }
 
@@ -406,21 +392,6 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
       return true
     }
 
-    const addMcp = (): void => {
-      void (async () => {
-        const cfg = await window.deva?.mcp?.upsert({
-          name: '新 MCP 服务',
-          description: '',
-          transport: 'stdio',
-          enabled: true
-        })
-        if (!cfg) return
-        const m = configToMcp(cfg, true)
-        setMcp((list) => [...list, m])
-        setSelected({ kind: 'mcp', id: m.id })
-      })()
-    }
-
     const addPersona = (): void => {
       void (async () => {
         const rec = await window.deva?.personas?.upsert({
@@ -537,9 +508,8 @@ export function ExtensionsProvider({ children }: { children: ReactNode }): React
             .catch(() => {})
       },
       add: (kind) => {
-        // 技能的「+」即上传导入（无手写空建）；MCP / Agent 提示词为可编辑空建。
+        // 技能的「+」即上传导入（无手写空建）；Agent 提示词为可编辑空建。MCP 只经对话创建（create_mcp）。
         if (kind === 'skill') return importSkill()
-        if (kind === 'mcp') return addMcp()
         return addPersona()
       },
       upsertPersona,

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, promises as fs } from 'node:fs'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { ipcMain } from 'electron'
-import { assertInside } from './fs-guard'
+import { assertAllInside, assertInside, insideRootFlags } from './fs-guard'
 import { getConfig, getDevaHome } from './config'
 import { detectShells } from './shells'
 import { loadProjectDoc, PROJECT_DOC_NAME, type ProjectDoc } from './project-doc'
@@ -462,16 +462,11 @@ function classifyCommitError(stderr: string): GitFailReason {
   return 'error'
 }
 
-/** 把渲染层传来的路径数组归一为绝对路径并逐个 assertInside（越界即抛）。 */
-function safeAbsPaths(paths: unknown): string[] {
+/** 把渲染层传来的路径数组归一为绝对路径并批量校验（任一越界即抛）。提交时会一次传入全部改动文件。 */
+async function safeAbsPaths(paths: unknown): Promise<string[]> {
   if (!Array.isArray(paths)) return []
-  const out: string[] = []
-  for (const p of paths) {
-    if (typeof p !== 'string' || !p) continue
-    const abs = resolve(p)
-    assertInside(abs)
-    out.push(abs)
-  }
+  const out = paths.filter((p): p is string => typeof p === 'string' && !!p).map((p) => resolve(p))
+  await assertAllInside(out)
   return out
 }
 
@@ -613,15 +608,17 @@ export function registerGitIpc(): void {
     const top = await runGitRaw(dir, ['rev-parse', '--show-toplevel'])
     const root = top.code === 0 && top.stdout.trim() ? resolve(top.stdout.trim()) : resolve(dir)
     const parsed = parsePorcelainV2(st.stdout, root)
-    // 只保留落在受信根内的文件（常见情形 root===项目根，无过滤；子目录场景下过滤根外文件）
-    const inside = (f: GitFileStatus): boolean => {
-      try {
-        assertInside(f.path)
-        return true
-      } catch {
-        return false
-      }
+    // 只保留落在受信根内的文件（常见情形 root===项目根，无过滤；子目录场景下过滤根外文件）。
+    // 须批量判定：未跟踪文件逐个列出（-uall），大仓可达上万条，逐条 assertInside 会把主进程卡住。
+    const keepInside = async (list: GitFileStatus[]): Promise<GitFileStatus[]> => {
+      const ok = await insideRootFlags(list.map((f) => f.path))
+      return list.filter((_, i) => ok[i])
     }
+    const [staged, unstaged, conflicts] = await Promise.all([
+      keepInside(parsed.staged),
+      keepInside(parsed.unstaged),
+      keepInside(parsed.conflicts)
+    ])
     const remotes = await listRemotes(dir)
     const merge = await runGitRaw(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])
     return {
@@ -634,9 +631,9 @@ export function registerGitIpc(): void {
       behind: parsed.behind,
       remotes,
       mergeInProgress: merge.code === 0,
-      staged: parsed.staged.filter(inside),
-      unstaged: parsed.unstaged.filter(inside),
-      conflicts: parsed.conflicts.filter(inside)
+      staged,
+      unstaged,
+      conflicts
     }
   })
 
@@ -665,7 +662,7 @@ export function registerGitIpc(): void {
   // 暂存（改/加/删都由 add 记录）
   ipcMain.handle('git:stage', async (_e, dir: string, paths: string[]) => {
     assertInside(dir)
-    const abs = safeAbsPaths(paths)
+    const abs = await safeAbsPaths(paths)
     if (!abs.length) return { ok: false as const, message: 'no paths' }
     const res = await runGit(dir, ['add', '--', ...abs])
     return res.code === 0 ? { ok: true as const } : { ok: false as const, message: res.stderr.trim() }
@@ -674,7 +671,7 @@ export function registerGitIpc(): void {
   // 取消暂存：有 HEAD → reset；首提交前无 HEAD → rm --cached
   ipcMain.handle('git:unstage', async (_e, dir: string, paths: string[]) => {
     assertInside(dir)
-    const abs = safeAbsPaths(paths)
+    const abs = await safeAbsPaths(paths)
     if (!abs.length) return { ok: false as const, message: 'no paths' }
     const head = await runGit(dir, ['rev-parse', '--verify', 'HEAD'])
     const res =
@@ -689,8 +686,8 @@ export function registerGitIpc(): void {
     'git:discard',
     async (_e, dir: string, trackedPaths: string[], untrackedPaths: string[]) => {
       assertInside(dir)
-      const tracked = safeAbsPaths(trackedPaths)
-      const untracked = safeAbsPaths(untrackedPaths)
+      const tracked = await safeAbsPaths(trackedPaths)
+      const untracked = await safeAbsPaths(untrackedPaths)
       if (tracked.length) await runGit(dir, ['checkout', 'HEAD', '--', ...tracked])
       for (const p of untracked) {
         await fs.rm(p, { force: true }).catch(() => {})

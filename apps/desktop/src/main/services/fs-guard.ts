@@ -1,4 +1,4 @@
-import { realpathSync } from 'fs'
+import { promises as fsp, realpathSync } from 'fs'
 import { basename, dirname, join, resolve, sep } from 'path'
 
 /**
@@ -36,6 +36,25 @@ function realResolve(p: string): string {
   return abs
 }
 
+/** realResolve 的异步版（realpath 在线程池里跑，不占主进程）：供批量判定用，结果与同步版逐条一致。 */
+async function realResolveAsync(p: string): Promise<string> {
+  const abs = resolve(p)
+  const tail: string[] = []
+  let cur = abs
+  for (let i = 0; i < 4096; i++) {
+    try {
+      const real = await fsp.realpath(cur)
+      return tail.length ? join(real, ...tail) : real
+    } catch {
+      const parent = dirname(cur)
+      if (parent === cur) return abs
+      tail.unshift(basename(cur))
+      cur = parent
+    }
+  }
+  return abs
+}
+
 /** 登记一个受信根（打开文件夹 / 挂载工作区时）。 */
 export function trustRoot(dir: string): void {
   roots.add(resolve(dir))
@@ -66,8 +85,30 @@ export function isInsideRoot(target: string): boolean {
   return false
 }
 
+const DENIED = '拒绝访问：路径不在已打开的项目内'
+
 export function assertInside(target: string): void {
-  if (!isInsideRoot(target)) throw new Error('拒绝访问：路径不在已打开的项目内')
+  if (!isInsideRoot(target)) throw new Error(DENIED)
+}
+
+/**
+ * 批量版 isInsideRoot（逐条语义相同）：受信根的真实路径只解析一次，目标走异步 realpath。
+ * 逐条调 isInsideRoot 会同步 realpath「目标 + 每个受信根」——git status 列出上万个文件时把主进程
+ * 卡住数十秒（受信根随挂载过的对话累积，耗时成倍增长）。
+ */
+export async function insideRootFlags(targets: string[]): Promise<boolean[]> {
+  const rootReals = [...roots].map(realResolve)
+  return Promise.all(
+    targets.map(async (t) => {
+      const real = await realResolveAsync(t)
+      return rootReals.some((r) => real === r || real.startsWith(r + sep))
+    })
+  )
+}
+
+/** 批量版 assertInside：任一越界即抛。 */
+export async function assertAllInside(targets: string[]): Promise<void> {
+  if ((await insideRootFlags(targets)).includes(false)) throw new Error(DENIED)
 }
 
 /**

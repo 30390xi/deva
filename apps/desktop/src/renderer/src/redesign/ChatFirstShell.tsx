@@ -5637,10 +5637,10 @@ function RolesPicker({
 }
 
 /**
- * 技能详情（对话优先外壳）：只读的钻取式主从抽屉，顶栏形态同 MCP 详情（返回 · 删除 · 启用）。
- * 只展示标准 SKILL.md 字段（name / description / compatibility / license / metadata）与 SKILL.md 正文，
- * allowed-tools 及 Deva 自有的 trigger 不显示，空字段整块隐藏。整页撑满设置面板、不出外层滚动条：
- * 描述不加标题、只占一行，正文吃掉剩余高度、过长时框内滚动。删除 = 技能文件夹移到系统回收站。
+ * 技能详情（对话优先外壳）：只读的钻取式主从抽屉，顶栏与名称分隔线同 MCP 详情（返回 · 删除 · 启用）。
+ * 只展示名称、可用角色与 SKILL.md 正文；描述及其余 frontmatter 字段（compatibility / license / metadata /
+ * allowed-tools，以及 Deva 自有的 trigger）一律不显示。整页撑满设置面板、不出外层滚动条：
+ * 正文吃掉剩余高度、过长时框内滚动。删除 = 技能文件夹移到系统回收站。
  * 仅自定义技能可进入；内置技能在列表里不可点开。
  */
 function SkillDetail({ item, onBack }: { item: Skill; onBack: () => void }): React.JSX.Element {
@@ -5648,11 +5648,6 @@ function SkillDetail({ item, onBack }: { item: Skill; onBack: () => void }): Rea
   const dialog = useDialog()
   const toast = useToast()
   const { toggle, removeSkill } = useExtensions()
-  // 运行环境要求 / 许可 / metadata 合成一张单行键值表，保证整页不出现外层滚动条。
-  const props: Array<[string, string]> = []
-  if (item.compatibility) props.push([t('extensions.compatibility'), item.compatibility])
-  if (item.license) props.push([t('extensions.license'), item.license])
-  props.push(...Object.entries(item.metadata))
 
   const onDelete = (): void => {
     const name = clipName(item.name)
@@ -5690,29 +5685,7 @@ function SkillDetail({ item, onBack }: { item: Skill; onBack: () => void }): Rea
         <h2 className="ext-detail__name ext-detail__name--mono">{item.name}</h2>
       </header>
 
-      {item.desc && (
-        <div className="ext-field ext-detail__desc">
-          <p className="ext-detail__text ext-detail__text--line" title={item.desc}>
-            {item.desc}
-          </p>
-        </div>
-      )}
-
       <RolesPicker kind="skill" id={item.id} roles={item.roles} />
-
-      {props.length > 0 && (
-        <div className="ext-field">
-          <label className="ext-field__label">{t('extensions.properties')}</label>
-          <dl className="ext-meta">
-            {props.map(([k, v], i) => (
-              <Fragment key={i}>
-                <dt>{k}</dt>
-                <dd title={v}>{v}</dd>
-              </Fragment>
-            ))}
-          </dl>
-        </div>
-      )}
 
       <div className="ext-field ext-field--grow">
         <label className="ext-field__label">{t('extensions.instructions')}</label>
@@ -5743,7 +5716,8 @@ const MCP_STATUS_WARN = new Set<McpStatus>(['error', 'needs_config', 'needs_secr
 
 /**
  * MCP 详情编辑（对话优先外壳）：钻取式主从抽屉，形态对齐模型设置页（顶部返回 + 逐字段即时落盘）。
- * 名称 / 传输 / 命令 / 参数 / 环境变量（或 URL / 请求头）经 update('mcp', …) round-trip 到 mcp.json；
+ * 传输 / 命令 / 参数 / 环境变量（或 URL / 请求头）经 update('mcp', …) round-trip 到 mcp.json；名称只读
+ * （创建时定下，见 create_mcp：改名不改 id、也不刷新已发给模型的工具说明，故不提供）。
  * 密钥恒经 mcpSetSecret 加密另存、写后不回显（`{secretRef}` 占位符落盘，明文零留痕）。
  */
 function McpEditor({ item, onBack }: { item: McpServer; onBack: () => void }): React.JSX.Element {
@@ -5824,15 +5798,6 @@ function McpEditor({ item, onBack }: { item: McpServer; onBack: () => void }): R
           {t('extensions.missingSecrets').replace('{fields}', item.missingSecrets.join(', '))}
         </div>
       )}
-
-      <div className="ext-field">
-        <label className="ext-field__label">{t('extensions.name')}</label>
-        <input
-          className="ext-input"
-          value={item.name}
-          onChange={(e) => update('mcp', item.id, { name: e.target.value })}
-        />
-      </div>
 
       <RolesPicker kind="mcp" id={item.id} roles={item.roles} />
 
