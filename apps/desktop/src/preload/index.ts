@@ -127,6 +127,8 @@ export interface ChatSessionMeta {
   model?: string
   /** 本对话思考等级；缺省 = 尚未定格（渲染层打开时定格为「最近使用」）。 */
   effort?: EffortLevel
+  /** 已归档（不在左侧对话列表里显示）；缺省 = 未归档。 */
+  archived?: boolean
 }
 
 /** 角色名片草稿（与 services/chat.ts 的 AgentDraft 对齐）。 */
@@ -966,6 +968,9 @@ const api = {
     /** 重命名对话并立即落库，回传最终标题（清空即恢复自动标题）；尚未建档的会话回 null。 */
     renameSession: (req: ChatRenameSessionRequest): Promise<{ title: string } | null> =>
       ipcRenderer.invoke('chat:rename-session', req),
+    /** 归档 / 取消归档并立即落库（不改顺序）；尚未建档的会话回 ok:false。 */
+    setArchived: (req: { sessionId: string; archived: boolean }): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('chat:set-archived', req),
     abort: (turnId: string): Promise<{ ok: true }> => ipcRenderer.invoke('chat:abort', turnId),
     /** 停止一个后台运行的子智能体（toolUseId = 其 Task 卡 id）；已结束 / 不存在回 ok:false。 */
     stopSubagent: (sessionId: string, toolUseId: string): Promise<{ ok: boolean }> =>

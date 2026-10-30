@@ -275,11 +275,39 @@ body.cf-resizing-y * {
   box-shadow: var(--shadow);
   animation: cf-addmenu-pop 0.14s ease;
 }
-/* 「新建对话」角色列表变体：定宽（长名字 / 专长不撑宽浮层），角色多时限高内滚。 */
+/* 「新建对话」角色列表变体：定宽（长名字 / 专长不撑宽浮层），角色多时角色列表限高内滚；
+   底部「已归档对话」一行固定，不随列表滚走。 */
 .cf-addmenu__pop--scroll {
   width: 248px;
   max-height: min(360px, 60vh);
+  display: flex;
+  flex-direction: column;
+}
+.cf-addmenu__list {
+  min-height: 0;
   overflow-y: auto;
+}
+.cf-addmenu__sep {
+  flex: none;
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.cf-addmenu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cf-addmenu__count {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.cf-addmenu__chev {
+  flex: none;
+  color: var(--fg-subtle);
 }
 /* 角色项：头像 | 名字 / 专长两行，各自单行省略（同花名册行 .cf-prow）。 */
 .cf-addmenu__item--persona {
@@ -644,6 +672,41 @@ body.cf-resizing-y * {
   }
 }
 
+/* 已归档对话：顶行「← 已归档对话 N」（返回按钮与搜索框同高，顶行高度不变） */
+.cf-rail__back {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.cf-rail__back:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.cf-rail__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-rail__count {
+  flex: none;
+  margin-right: var(--space-1);
+  font-size: 12px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 列表区（消息或角色共用滚动容器） */
 .cf-list {
   flex: 1;
@@ -907,6 +970,39 @@ body.cf-resizing-y * {
 }
 .cf-conv__head .cf-idbtn {
   -webkit-app-region: no-drag;
+}
+/* 打开的是已归档对话：角色名后「已归档」标签，右侧「移回对话列表」 */
+.cf-conv__tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.cf-conv__headbtn {
+  flex: none;
+  margin-left: auto;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.cf-conv__headbtn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 /* 无对话头的中列界面（快速开启 / 角色空态 / 资料卡）顶部拖拽把手：透明、与原生标题栏（40px）等高，
    补齐这些界面缺失的窗口拖拽区（对话视图由 .cf-conv__head 承担）。 */

@@ -232,6 +232,8 @@ export interface SessionMeta {
   model?: string
   /** 本对话思考等级；缺省 = 尚未定格（打开时定格为「最近使用」）。见 chat store 的 bindings.effort。 */
   effort?: EffortLevel
+  /** 已归档（不在左侧对话列表里显示）；缺省 = 未归档。 */
+  archived?: boolean
 }
 
 /** send 接受的附件（路径给主进程读取，名称/类型用于本地乐观气泡）。 */
@@ -427,6 +429,8 @@ interface ChatContextValue {
   deleteSession: (id: string) => void
   /** 重命名对话（立即落库）；title 为空即恢复自动标题（由首条用户消息派生）。不改列表顺序。 */
   renameSession: (id: string, title: string) => void
+  /** 归档 / 取消归档对话（立即落库）。不改列表顺序；在已归档的对话里发消息会由主进程自动取消归档。 */
+  setArchived: (id: string, archived: boolean) => void
   /**
    * 批量删除对话（删除角色时一并清理其名下历史）。一次性中止各自在跑回合、逐条落盘删除、清绑定
    * 覆盖层，最后只刷新一次列表；若当前会话在其中，则切到最近一条或起新会话。空数组为无操作。
@@ -1794,6 +1798,17 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       })()
     }
 
+    // 归档 / 取消归档：先就地改标记（列表立刻移走 / 移回），再落盘；失败（尚未建档）则以主进程清单为准。
+    const setArchived = (id: string, archived: boolean): void => {
+      setSessions((list) =>
+        list.map((s) => (s.id === id ? { ...s, archived: archived || undefined } : s))
+      )
+      void (async () => {
+        const r = await window.deva.chat.setArchived({ sessionId: id, archived })
+        if (!r.ok) void refreshSessions()
+      })()
+    }
+
     // 批量删除（删角色时清其名下全部对话）：中止各自在跑回合 → 逐条落盘删除 → 清绑定覆盖层 →
     // 只刷新一次列表；当前会话若在删除集内，切到最近一条或起新会话。与单条 deleteSession 同语义，
     // 但合并刷新、避免 N 条并发各自 listSessions/切换互相打架。
@@ -1991,6 +2006,7 @@ export function ChatProvider({ children }: { children: ReactNode }): React.JSX.E
       selectSession,
       deleteSession,
       renameSession,
+      setArchived,
       deleteSessions,
       deleteTurns,
       rewindApply,

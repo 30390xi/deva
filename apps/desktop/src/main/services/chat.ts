@@ -81,6 +81,7 @@ import {
   deleteSession as deleteStoredSession,
   listSessions,
   save as saveProject,
+  setSessionArchived,
   type ChatSessionMeta,
   type StoredNotice,
   type StoredSession
@@ -217,6 +218,12 @@ interface ChatSetFocusRequest {
 interface ChatRenameSessionRequest {
   sessionId: string
   title: string
+}
+
+/** 归档 / 取消归档对话（立即落库）。见 chat:set-archived。 */
+interface ChatSetArchivedRequest {
+  sessionId: string
+  archived: boolean
 }
 
 /** 用户自定的对话标题上限（列表里单行省略显示，再长也看不全）。 */
@@ -2013,6 +2020,9 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
 
   /** 广播回合开始：本轮用户消息（历史末条）按展示形态带出，与重载后看到的气泡一致。 */
   function emitTurnStart(turnId: string, sessionId: string, history: Message[]): void {
+    // 已归档的对话开始新一轮（发消息 / 定时任务运行 / 后台任务通知）即移回列表：渲染层收到 turn_start
+    // 会重拉列表，故须在发出前落盘。
+    if (getSession(sessionId)?.archived) setSessionArchived(sessionId, false)
     const [user] = toDisplayMessages(history.slice(-1))
     if (user?.role === 'user') emit(turnId, sessionId, { type: 'turn_start', user })
   }
@@ -3916,6 +3926,11 @@ export function registerChatIpc(getWindow: () => BrowserWindow | null): void {
       return { title }
     }
   )
+
+  // 归档 / 取消归档：只改这一个标记并落盘，不动 updatedAt（列表顺序不变）。尚未建档的惰性会话回 ok:false。
+  ipcMain.handle('chat:set-archived', (_e, payload: ChatSetArchivedRequest): { ok: boolean } => ({
+    ok: setSessionArchived(payload.sessionId, payload.archived === true)
+  }))
 
   // 左侧会话列表：一次列全部（对话无项目/分桶概念）。IPC 仍收 workspaceRoot 以兼容渲染层调用签名，忽略即可。
   ipcMain.handle(

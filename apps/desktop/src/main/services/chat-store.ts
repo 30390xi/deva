@@ -74,6 +74,11 @@ export interface StoredSession {
    */
   effort?: EffortLevel
   /**
+   * 已归档：从左侧对话列表移走（经「新建对话」浮层底部的「已归档对话」查看），内容与上下文不受影响。
+   * 缺省 = 未归档。在已归档的对话里开始新一轮（发消息 / 定时任务运行 / 后台任务通知）即自动取消。
+   */
+  archived?: boolean
+  /**
    * 角色名片（propose_agent 提议）的终态边车，按 toolUseId 记录 accepted/rejected。
    * 名片本体随 Message[] 天然存活，但其接受/拒绝终态无处落——此边车确保重开不退回 pending、
    * 不重复建角色。pending 不入表（缺省即 pending）。见 chat.ts:chat:resolve-proposal。
@@ -197,6 +202,8 @@ export interface ChatSessionMeta {
   model?: string
   /** 本对话的思考等级。见 StoredSession.effort。 */
   effort?: EffortLevel
+  /** 已归档。见 StoredSession.archived。 */
+  archived?: boolean
 }
 
 /**
@@ -250,7 +257,8 @@ function metaOf(s: StoredSession): ChatSessionMeta {
     personaId: s.personaId,
     focusRoot: s.focusRoot ?? null,
     model: s.model,
-    effort: s.effort
+    effort: s.effort,
+    archived: s.archived
   }
 }
 
@@ -417,6 +425,17 @@ export function rebindSessionPersona(id: string, from: string, to: string): bool
   const s = loadSessionFile(id)
   if (!s || s.personaId !== from) return false
   s.personaId = to
+  save(id)
+  return true
+}
+
+/** 归档 / 取消归档并落盘，返回是否找到该对话。不动 updatedAt（列表顺序不变）。 */
+export function setSessionArchived(id: string, archived: boolean): boolean {
+  const s = loadSessionFile(id)
+  if (!s) return false
+  if (!!s.archived === archived) return true
+  if (archived) s.archived = true
+  else delete s.archived
   save(id)
   return true
 }

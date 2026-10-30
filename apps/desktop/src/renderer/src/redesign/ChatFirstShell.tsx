@@ -11,6 +11,9 @@ import {
 import {
   AlarmClock,
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
+  ArrowLeft,
   ArrowDownToLine,
   ArrowUpFromLine,
   ArrowUpToLine,
@@ -334,6 +337,7 @@ export function ChatFirstShell(): React.JSX.Element {
     selectSession,
     deleteSession,
     renameSession,
+    setArchived,
     deleteSessions,
     deleteTurns,
     currentBinding,
@@ -347,6 +351,7 @@ export function ChatFirstShell(): React.JSX.Element {
   const { tasks } = useTasks()
   const { t, locale } = useI18n()
   const dialog = useDialog()
+  const toast = useToast()
 
   const [railTab, setRailTab] = useState<RailTab>('chats')
   // 图标栏「对话」按钮的红点：其他对话有新消息或待你处理时亮起（与头像红点同口径）。
@@ -589,6 +594,15 @@ export function ChatFirstShell(): React.JSX.Element {
       if (next !== null) renameSession(id, next)
     })()
   }
+  // 右键归档：从列表移走，提示条带「撤销」。名字经 clipName 限长，随语言拼装。
+  const archiveThread = (id: string, title: string): void => {
+    setArchived(id, true)
+    const name = clipName(title || t('chat.untitled'))
+    toast.show({
+      message: locale === 'en' ? `Archived “${name}”` : `已归档「${name}」`,
+      action: { label: t('cf.undo'), onClick: () => setArchived(id, false) }
+    })
+  }
   // 按「轮」删除当前对话的选中轮次（同步删上下文）：先弹居中破坏性确认，确认后走 store.deleteTurns。
   // 返回是否已删——Conversation 据此退出选择态并清空选择（未确认则保持选择态供继续调整）。
   const deleteTurnsWithConfirm = async (indices: number[]): Promise<boolean> => {
@@ -715,6 +729,8 @@ export function ChatFirstShell(): React.JSX.Element {
               onAddPersonaByChat={addPersonaByChat}
               onNewChatFromThread={newChatFromThread}
               onRenameThread={renameThread}
+              onArchiveThread={archiveThread}
+              onUnarchiveThread={(id) => setArchived(id, false)}
               onDeleteThread={deleteThread}
               onDeletePersona={deletePersona}
               onReorderPersonas={reorderPersonas}
@@ -759,6 +775,8 @@ export function ChatFirstShell(): React.JSX.Element {
                 onOpenProposal={openProposal}
                 onOpenAutotask={openAutotask}
                 onDeleteTurns={deleteTurnsWithConfirm}
+                archived={!!railSessions.find((s) => s.id === currentSessionId)?.archived}
+                onUnarchive={() => setArchived(currentSessionId, false)}
                 attention={sessionStates[currentSessionId]?.attention ?? false}
                 prefill={composerPrefill}
                 onPrefill={(text) => setComposerPrefill({ text, nonce: Date.now() })}
@@ -876,7 +894,7 @@ function IconRail({
 
 /** 列表行右键菜单：光标处（视口坐标）+ 目标（对话或角色）。 */
 type RowMenu =
-  | { x: number; y: number; kind: 'thread'; id: string; title: string }
+  | { x: number; y: number; kind: 'thread'; id: string; title: string; archived: boolean }
   | { x: number; y: number; kind: 'persona'; id: string; name: string }
 
 /* ============================ 左栏：列表列（对话 / 角色） ============================ */
@@ -915,6 +933,8 @@ function Rail({
   onAddPersonaByChat,
   onNewChatFromThread,
   onRenameThread,
+  onArchiveThread,
+  onUnarchiveThread,
   onDeleteThread,
   onDeletePersona,
   onReorderPersonas,
@@ -939,6 +959,9 @@ function Rail({
   onNewChatFromThread: (id: string) => void
   /** 重命名对话（弹框输入新标题）；title 为当前标题。 */
   onRenameThread: (id: string, title: string) => void
+  /** 归档（从列表移走，提示条可撤销）/ 移回对话列表。 */
+  onArchiveThread: (id: string, title: string) => void
+  onUnarchiveThread: (id: string) => void
   onDeleteThread: (id: string, title: string) => void
   onDeletePersona: (id: string, name: string) => void
   onReorderPersonas: (ids: string[]) => void
@@ -963,6 +986,17 @@ function Rail({
   // 浮出列表收回、从列表新建对话时一并清空。
   const [filters, setFilters] = useState<ConvFilter[]>(railSearchMemo.filters)
   const [filterOpen, setFilterOpen] = useState(false)
+  // 已归档对话：从「新建对话」浮层底部进入，在列表这一栏里列出，顶部「←」返回。已归档的不进列表、搜索与筛选。
+  const [archiveView, setArchiveView] = useState(false)
+  const liveSessions = useMemo(() => sessions.filter((s) => !s.archived), [sessions])
+  const archivedSessions = useMemo(
+    () => sessions.filter((s) => s.archived).sort((a, b) => b.updatedAt - a.updatedAt),
+    [sessions]
+  )
+  // 最后一个已归档对话被移回或删除：入口随之隐藏，自动回到对话列表。
+  useEffect(() => {
+    if (archiveView && archivedSessions.length === 0) setArchiveView(false)
+  }, [archiveView, archivedSessions.length])
   useEffect(() => {
     railSearchMemo.query = queries
     railSearchMemo.filters = filters
@@ -983,13 +1017,14 @@ function Rail({
   const asideRef = useRef<HTMLElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   // 收起后浮出列表收回时：连带关掉在它里面打开的右键菜单（否则菜单留在隐藏的列表里，下次浮出时它的全屏
-  // 透明背板跟着回来，第一下点击被背板吃掉）；清空搜索词与筛选（浮出列表是临时的，下次浮出不该还是筛过的样子）；
-  // 焦点若还在列表里（如搜索框）也移走，免得接着打字打进看不见的框。
+  // 透明背板跟着回来，第一下点击被背板吃掉）；清空搜索词与筛选、退出已归档对话（浮出列表是临时的，下次浮出
+  // 不该还是筛过的样子）；焦点若还在列表里（如搜索框）也移走，免得接着打字打进看不见的框。
   useEffect(() => {
     if (!collapsed || peek) return
     setMenu(null)
     setQuery('')
     clearFilters()
+    setArchiveView(false)
     const el = document.activeElement
     if (el instanceof HTMLElement && asideRef.current?.contains(el)) el.blur()
   }, [collapsed, peek])
@@ -1046,18 +1081,18 @@ function Rail({
   const filterOptions = useMemo(() => {
     if (!filterOpen) return null
     const roles = personas
-      .filter((p) => roleIds.includes(p.id) || sessions.some((s) => s.personaId === p.id))
+      .filter((p) => roleIds.includes(p.id) || liveSessions.some((s) => s.personaId === p.id))
       .map((p) => ({
         persona: p,
-        n: sessions.filter((s) => s.personaId === p.id && passFolders(s, folderKeys)).length
+        n: liveSessions.filter((s) => s.personaId === p.id && passFolders(s, folderKeys)).length
       }))
     const paths: string[] = []
-    for (const s of [...sessions].sort((a, b) => b.updatedAt - a.updatedAt))
+    for (const s of [...liveSessions].sort((a, b) => b.updatedAt - a.updatedAt))
       if (s.focusRoot && !paths.includes(s.focusRoot)) paths.push(s.focusRoot)
     for (const k of folderKeys) if (k !== NO_FOLDER && !paths.includes(k)) paths.push(k)
     const names = paths.map(basename)
     const count = (key: string): number =>
-      sessions.filter((s) => folderKeyOf(s) === key && passRoles(s, roleIds)).length
+      liveSessions.filter((s) => folderKeyOf(s) === key && passRoles(s, roleIds)).length
     const folders = paths.map((path, i) => ({
       key: path,
       name: names[i],
@@ -1073,7 +1108,7 @@ function Rail({
     if (paths.length && (none || folderKeys.includes(NO_FOLDER)))
       folders.push({ key: NO_FOLDER, name: t('cf.filterNoFolder'), hint: '', n: none })
     return { roles, folders }
-  }, [filterOpen, personas, sessions, roleIds, folderKeys, t])
+  }, [filterOpen, personas, liveSessions, roleIds, folderKeys, t])
   // 搜索框里的已选标签：角色头像（按选中先后）与文件夹。
   const pickedRoles = roleIds
     .map((id) => personas.find((p) => p.id === id))
@@ -1094,7 +1129,7 @@ function Rail({
   const q = query.trim().toLowerCase()
   // 消息列表按最近更新降序，先按筛选条件，再按检索词过滤（标题 + 所属角色名 + 挂载的文件夹名，均大小写不敏感）。
   const ordered = useMemo(() => {
-    const sorted = [...sessions]
+    const sorted = [...liveSessions]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .filter((s) => passRoles(s, roleIds) && passFolders(s, folderKeys))
     if (!q) return sorted
@@ -1106,7 +1141,7 @@ function Rail({
         (s.focusRoot ? basename(s.focusRoot).toLowerCase().includes(q) : false)
       )
     })
-  }, [sessions, personas, q, roleIds, folderKeys])
+  }, [liveSessions, personas, q, roleIds, folderKeys])
   // 角色列表按检索词过滤（角色名 + 简介，均大小写不敏感）；空词返回全部。
   const shownPersonas = useMemo(() => {
     if (!q) return personas
@@ -1131,6 +1166,28 @@ function Rail({
     const ids = personas.map((p) => p.id)
     onReorderPersonas([id, ...ids.filter((x) => x !== id)])
   }
+  // 对话行（对话列表与已归档对话共用）：右键菜单记下是否已归档，菜单项随之不同。
+  const threadRow = (s: SessionMeta): React.JSX.Element => (
+    <ThreadRow
+      key={s.id}
+      session={s}
+      owner={personas.find((p) => p.id === s.personaId)}
+      state={sessionStates[s.id]}
+      active={s.id === currentSessionId}
+      onClick={() => onOpenThread(s.id)}
+      onContext={(e) => {
+        e.preventDefault()
+        setMenu({
+          x: e.clientX,
+          y: e.clientY,
+          kind: 'thread',
+          id: s.id,
+          title: s.title || '',
+          archived: !!s.archived
+        })
+      }}
+    />
+  )
   return (
     <aside
       ref={asideRef}
@@ -1147,87 +1204,113 @@ function Rail({
           消息 tab 的搜索框最左是筛选按钮（代替放大镜）；选了条件后换成已选的角色头像（堆叠）与文件夹（多个时标数字），
           点它们同样打开筛选面板。 */}
       <div className="cf-rail__top">
-        <div className={`cf-search${tab === 'chats' ? ' cf-search--filter' : ''}`}>
-          {tab !== 'chats' ? (
-            <Search className="cf-search__icon" size={14} />
-          ) : filters.length === 0 ? (
+        {tab === 'chats' && archiveView ? (
+          // 已归档对话：顶行换成「← 已归档对话 N」，返回即回到对话列表（搜索词与筛选原样保留）。
+          <>
             <button
-              className="cf-search__filter"
-              title={t('cf.filter')}
-              aria-label={t('cf.filter')}
-              aria-haspopup="menu"
-              aria-expanded={filterOpen}
-              onClick={() => setFilterOpen((o) => !o)}
+              className="cf-rail__back"
+              title={t('cf.backToChats')}
+              aria-label={t('cf.backToChats')}
+              onClick={() => setArchiveView(false)}
             >
-              <ListFilter size={15} />
+              <ArrowLeft size={16} />
             </button>
-          ) : (
-            <button
-              className="cf-search__tokens"
-              aria-label={filterSummary}
-              aria-haspopup="menu"
-              aria-expanded={filterOpen}
-              onClick={() => setFilterOpen((o) => !o)}
-            >
-              {pickedRoles.length > 0 && <AvatarStack personas={pickedRoles} size={20} max={3} />}
-              {folderKeys.length > 0 && (
-                <span
-                  className={`cf-search__folder${folderKeys.length > 1 ? ' has-badge' : ''}`}
-                  title={folderNames}
-                >
-                  {folderKeys.length === 1 && folderKeys[0] === NO_FOLDER ? (
-                    <FolderMinus size={15} />
-                  ) : (
-                    <Folder size={15} />
-                  )}
-                  {folderKeys.length > 1 && <span className="cf-search__badge">{folderKeys.length}</span>}
-                </span>
-              )}
-            </button>
-          )}
-          <input
-            className="cf-search__input"
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              // 输入框为空时按退格，撤掉最后选的一项筛选。
-              if (e.key !== 'Backspace' || query || !filters.length || e.nativeEvent.isComposing) return
-              e.preventDefault()
-              setFilters((fs) => fs.slice(0, -1))
-            }}
-            placeholder={
-              tab === 'chats' ? t(filters.length ? 'cf.search' : 'cf.searchChats') : t('cf.searchRoster')
-            }
-            aria-label={t('cf.search')}
-          />
-          {(query || filters.length > 0) && (
-            <button
-              className="cf-search__clear"
-              title={filters.length ? t('cf.clearSearch') : t('common.close')}
-              aria-label={filters.length ? t('cf.clearSearch') : t('common.close')}
-              onClick={() => {
-                setQuery('')
-                clearFilters()
+            <span className="cf-rail__title">{t('cf.archivedChats')}</span>
+            <span className="cf-rail__count">{archivedSessions.length}</span>
+          </>
+        ) : (
+          <>
+          <div className={`cf-search${tab === 'chats' ? ' cf-search--filter' : ''}`}>
+            {tab !== 'chats' ? (
+              <Search className="cf-search__icon" size={14} />
+            ) : filters.length === 0 ? (
+              <button
+                className="cf-search__filter"
+                title={t('cf.filter')}
+                aria-label={t('cf.filter')}
+                aria-haspopup="menu"
+                aria-expanded={filterOpen}
+                onClick={() => setFilterOpen((o) => !o)}
+              >
+                <ListFilter size={15} />
+              </button>
+            ) : (
+              <button
+                className="cf-search__tokens"
+                aria-label={filterSummary}
+                aria-haspopup="menu"
+                aria-expanded={filterOpen}
+                onClick={() => setFilterOpen((o) => !o)}
+              >
+                {pickedRoles.length > 0 && <AvatarStack personas={pickedRoles} size={20} max={3} />}
+                {folderKeys.length > 0 && (
+                  <span
+                    className={`cf-search__folder${folderKeys.length > 1 ? ' has-badge' : ''}`}
+                    title={folderNames}
+                  >
+                    {folderKeys.length === 1 && folderKeys[0] === NO_FOLDER ? (
+                      <FolderMinus size={15} />
+                    ) : (
+                      <Folder size={15} />
+                    )}
+                    {folderKeys.length > 1 && <span className="cf-search__badge">{folderKeys.length}</span>}
+                  </span>
+                )}
+              </button>
+            )}
+            <input
+              className="cf-search__input"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // 输入框为空时按退格，撤掉最后选的一项筛选。
+                if (e.key !== 'Backspace' || query || !filters.length || e.nativeEvent.isComposing) return
+                e.preventDefault()
+                setFilters((fs) => fs.slice(0, -1))
               }}
-            >
-              <X size={13} />
-            </button>
+              placeholder={
+                tab === 'chats' ? t(filters.length ? 'cf.search' : 'cf.searchChats') : t('cf.searchRoster')
+              }
+              aria-label={t('cf.search')}
+            />
+            {(query || filters.length > 0) && (
+              <button
+                className="cf-search__clear"
+                title={filters.length ? t('cf.clearSearch') : t('common.close')}
+                aria-label={filters.length ? t('cf.clearSearch') : t('common.close')}
+                onClick={() => {
+                  setQuery('')
+                  clearFilters()
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          {tab === 'chats' && (
+            <NewChatMenu
+              personas={personas}
+              archivedCount={archivedSessions.length}
+              onStart={(id) => startFresh(() => onStartPersona(id))}
+              onOpenArchive={() => {
+                setFilterOpen(false)
+                setArchiveView(true)
+              }}
+            />
           )}
-        </div>
-        {tab === 'chats' && (
-          <NewChatMenu personas={personas} onStart={(id) => startFresh(() => onStartPersona(id))} />
-        )}
-        {tab === 'roster' && (
-          <AddMenu
-            manualLabel={t('cf.addPersona')}
-            chatLabel={t('cf.addByChat')}
-            onManual={onAddPersona}
-            onByChat={onAddPersonaByChat}
-          />
+          {tab === 'roster' && (
+            <AddMenu
+              manualLabel={t('cf.addPersona')}
+              chatLabel={t('cf.addByChat')}
+              onManual={onAddPersona}
+              onByChat={onAddPersonaByChat}
+            />
+          )}
+          </>
         )}
         {/* 筛选面板：外观同统一下拉框的浮层，角色与文件夹两栏，点选即时生效、面板不收起。选中项铺浅主题色底（同对话列表的当前行），不用行尾对勾。 */}
-        {tab === 'chats' && filterOptions && (
+        {tab === 'chats' && !archiveView && filterOptions && (
           <div className="select-menu cf-filter" role="menu" aria-label={t('cf.filter')}>
             <div className="select-menu__group">{t('cf.filterRoles')}</div>
             {filterOptions.roles.map(({ persona: p, n }) => {
@@ -1289,7 +1372,9 @@ function Rail({
 
       {/* 角色 tab：角色为空只会是还没加载完（默认角色 Deva 删不掉），先留空，不落到「未找到匹配项」。 */}
       <div className="cf-list" ref={listRef}>
-        {tab === 'chats' ? (
+        {tab === 'chats' && archiveView ? (
+          archivedSessions.map(threadRow)
+        ) : tab === 'chats' ? (
           ordered.length === 0 ? (
             <div className="cf-empty">
               {q || filters.length ? t('cf.searchNoResults') : t('chat.noSessions')}
@@ -1300,26 +1385,7 @@ function Rail({
               )}
             </div>
           ) : (
-            ordered.map((s) => (
-              <ThreadRow
-                key={s.id}
-                session={s}
-                owner={personas.find((p) => p.id === s.personaId)}
-                state={sessionStates[s.id]}
-                active={s.id === currentSessionId}
-                onClick={() => onOpenThread(s.id)}
-                onContext={(e) => {
-                  e.preventDefault()
-                  setMenu({
-                    x: e.clientX,
-                    y: e.clientY,
-                    kind: 'thread',
-                    id: s.id,
-                    title: s.title || ''
-                  })
-                }}
-              />
-            ))
+            ordered.map(threadRow)
           )
         ) : personas.length === 0 ? null : shownPersonas.length === 0 ? (
           <div className="cf-empty">{t('cf.searchNoResults')}</div>
@@ -1356,7 +1422,21 @@ function Rail({
           y={menu.y}
           onClose={() => setMenu(null)}
           items={
-            menu.kind === 'thread'
+            menu.kind === 'thread' && menu.archived
+              ? [
+                  {
+                    label: t('cf.unarchive'),
+                    icon: <ArchiveRestore size={14} />,
+                    onClick: () => onUnarchiveThread(menu.id)
+                  },
+                  {
+                    label: t('cf.deleteChat'),
+                    icon: <Trash2 size={14} />,
+                    danger: true,
+                    onClick: () => onDeleteThread(menu.id, menu.title)
+                  }
+                ]
+              : menu.kind === 'thread'
               ? [
                   {
                     label: t('cf.newChat'),
@@ -1367,6 +1447,11 @@ function Rail({
                     label: t('cf.renameChat'),
                     icon: <Pencil size={14} />,
                     onClick: () => onRenameThread(menu.id, menu.title)
+                  },
+                  {
+                    label: t('cf.archive'),
+                    icon: <Archive size={14} />,
+                    onClick: () => onArchiveThread(menu.id, menu.title)
                   },
                   {
                     label: t('cf.deleteChat'),
@@ -2305,14 +2390,19 @@ function useHoverMenu(): {
 
 /**
  * 「新建对话」入口（消息 tab 搜索行右侧）：外观与交互同 AddMenu，浮层列出花名册全部角色，
- * 点某个角色即以其开启一条全新对话（onStart → startWith）。角色多时浮层内滚动。
+ * 点某个角色即以其开启一条全新对话（onStart → startWith）。角色多时角色列表内滚动；有已归档对话时
+ * 底部隔线固定一行「已归档对话」与数量（不随列表滚走），点了在列表这一栏打开已归档对话。
  */
 function NewChatMenu({
   personas,
-  onStart
+  archivedCount,
+  onStart,
+  onOpenArchive
 }: {
   personas: Persona[]
+  archivedCount: number
   onStart: (personaId: string) => void
+  onOpenArchive: () => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const { open, hoverProps, show, choose } = useHoverMenu()
@@ -2328,25 +2418,41 @@ function NewChatMenu({
       >
         <Plus size={16} />
       </button>
-      {open && personas.length > 0 && (
+      {open && (personas.length > 0 || archivedCount > 0) && (
         <div className="cf-addmenu__pop cf-addmenu__pop--scroll" role="menu">
-          {personas.map((p) => (
-            <button
-              key={p.id}
-              className="cf-addmenu__item cf-addmenu__item--persona"
-              role="menuitem"
-              // 名字 / 专长过长时单行省略，悬停 title 给出全文。
-              title={p.desc ? `${p.name} · ${p.desc}` : p.name}
-              onClick={() => choose(() => onStart(p.id))}
-            >
-              <Avatar persona={p} size={28} />
-              {/* 与花名册行同构：角色名 + 专长（未填写则只显示名字）。 */}
-              <span className="cf-addmenu__main">
-                <span className="cf-addmenu__name">{p.name}</span>
-                {p.desc && <span className="cf-addmenu__desc">{p.desc}</span>}
-              </span>
-            </button>
-          ))}
+          {personas.length > 0 && (
+            <div className="cf-addmenu__list">
+              {personas.map((p) => (
+                <button
+                  key={p.id}
+                  className="cf-addmenu__item cf-addmenu__item--persona"
+                  role="menuitem"
+                  // 名字 / 专长过长时单行省略，悬停 title 给出全文。
+                  title={p.desc ? `${p.name} · ${p.desc}` : p.name}
+                  onClick={() => choose(() => onStart(p.id))}
+                >
+                  <Avatar persona={p} size={28} />
+                  {/* 与花名册行同构：角色名 + 专长（未填写则只显示名字）。 */}
+                  <span className="cf-addmenu__main">
+                    <span className="cf-addmenu__name">{p.name}</span>
+                    {p.desc && <span className="cf-addmenu__desc">{p.desc}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* 没有已归档对话时连同分隔线一起不显示。 */}
+          {archivedCount > 0 && (
+            <>
+              {personas.length > 0 && <div className="cf-addmenu__sep" />}
+              <button className="cf-addmenu__item" role="menuitem" onClick={() => choose(onOpenArchive)}>
+                <Archive size={15} className="cf-addmenu__icon" />
+                <span className="cf-addmenu__label">{t('cf.archivedChats')}</span>
+                <span className="cf-addmenu__count">{archivedCount}</span>
+                <ChevronRight size={14} className="cf-addmenu__chev" />
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -3410,6 +3516,8 @@ function Conversation({
   onOpenProposal,
   onOpenAutotask,
   onDeleteTurns,
+  archived,
+  onUnarchive,
   attention,
   prefill,
   onPrefill,
@@ -3434,6 +3542,9 @@ function Conversation({
   onOpenAutotask: (taskId: string) => void
   /** 按「轮」删除选中轮次（含破坏性确认）；返回是否已删（true=退出选择态并清空选择）。 */
   onDeleteTurns: (turnIndices: number[]) => Promise<boolean>
+  /** 当前对话已归档：标题栏显示「已归档」与「移回对话列表」。 */
+  archived: boolean
+  onUnarchive: () => void
   /** 当前会话有待用户处理的卡片（问答 / 计划 / 挂载请求）：此时不开回滚面板。 */
   attention: boolean
   /** 输入框预填（一次性、不发送）；null 表示无待预填。 */
@@ -3860,6 +3971,18 @@ function Conversation({
           {/* 顶部只显示角色名称（去掉头像与描述行）；仍可点击打开资料卡。 */}
           <div className="cf-idbtn__name">{owner?.name ?? ''}</div>
         </button>
+        {archived && (
+          <>
+            <span className="cf-conv__tag">
+              <Archive size={11} />
+              {t('cf.archivedTag')}
+            </span>
+            <button className="cf-conv__headbtn" onClick={onUnarchive}>
+              <ArchiveRestore size={13} />
+              {t('cf.unarchive')}
+            </button>
+          </>
+        )}
       </div>
 
       {/* 删除入口在聊天区右键唤起（见 onMsgsContextMenu）；选择态由右键菜单的「选择删除」开启。 */}

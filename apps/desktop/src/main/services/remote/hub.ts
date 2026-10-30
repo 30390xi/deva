@@ -942,8 +942,9 @@ async function runCommand(chat: ChatAddress, name: string, arg: string, trail: T
       return true
     }
     case 'list': {
+      // 同桌面左侧列表：已归档的对话不列出。
       const all = listSessions()
-        .filter((s) => allows(chat.channel, s))
+        .filter((s) => !s.archived && allows(chat.channel, s))
         .sort((a, b) => b.updatedAt - a.updatedAt)
       const list = all.slice(0, LIST_MAX)
       if (!list.length) {
