@@ -177,11 +177,16 @@ interface RunResult {
  * 底层执行（不做 assertInside）：供 `git --version` 等无仓库根上下文的命令用。
  * 用户可控串一律作独立 argv；env 关掉交互提示与可选锁，锁定英文错误文案便于解析。
  */
-function runGitRaw(cwd: string | undefined, args: string[], timeout = DEFAULT_TIMEOUT): Promise<RunResult> {
+function runGitRaw(
+  cwd: string | undefined,
+  args: string[],
+  timeout = DEFAULT_TIMEOUT,
+  input?: string
+): Promise<RunResult> {
   const git = resolveGitPath()
   if (!git) return Promise.resolve({ code: -1, stdout: '', stderr: 'git-not-found' })
   return new Promise((res) => {
-    execFile(
+    const child = execFile(
       git,
       args,
       {
@@ -199,13 +204,39 @@ function runGitRaw(cwd: string | undefined, args: string[], timeout = DEFAULT_TI
         res({ code, stdout: stdout ?? '', stderr: stderr ?? '' })
       }
     )
+    // 经 stdin 传入数据（如 --pathspec-from-file=-）。git 提前退出时写管道会报 EPIPE，须吞掉，否则主进程崩溃。
+    if (input !== undefined) {
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(input)
+    }
   })
 }
 
 /** 仓库操作执行器：首行 `assertInside(dir)`，随后交给 runGitRaw。 */
-function runGit(dir: string, args: string[], timeout = DEFAULT_TIMEOUT): Promise<RunResult> {
+function runGit(dir: string, args: string[], timeout = DEFAULT_TIMEOUT, input?: string): Promise<RunResult> {
   assertInside(dir)
-  return runGitRaw(dir, args, timeout)
+  return runGitRaw(dir, args, timeout, input)
+}
+
+/** 路径作 argv 时的总长预算（字符）：Windows 整条命令行上限 32767，留足余量。 */
+const ARGV_PATHS_BUDGET = 24_000
+
+/**
+ * 对一批路径执行 git（add / reset / rm --cached / checkout）：总长在预算内照常作 argv（`-- p1 p2…`）；
+ * 超出则经 stdin 传入（`--pathspec-from-file=- --pathspec-file-nul`，需 git ≥ 2.25）——提交框会一次传入
+ * 全部改动文件，几百个绝对路径就会超出 Windows 命令行上限（spawn ENAMETOOLONG）。
+ * 大批量时 git 本身就慢（Windows 上暂存 3 万个文件实测约 20 秒），超时放宽到 REMOTE_TIMEOUT：
+ * 超时被杀可能残留 index.lock，导致后续 git 操作全部失败。
+ */
+function runGitPaths(dir: string, args: string[], paths: string[]): Promise<RunResult> {
+  const len = paths.reduce((n, p) => n + p.length + 3, 0)
+  if (len <= ARGV_PATHS_BUDGET) return runGit(dir, [...args, '--', ...paths])
+  return runGit(
+    dir,
+    [...args, '--pathspec-from-file=-', '--pathspec-file-nul'],
+    REMOTE_TIMEOUT,
+    paths.join('\0')
+  )
 }
 
 // ── 解析 ─────────────────────────────────────────────────────────────────────
@@ -664,7 +695,7 @@ export function registerGitIpc(): void {
     assertInside(dir)
     const abs = await safeAbsPaths(paths)
     if (!abs.length) return { ok: false as const, message: 'no paths' }
-    const res = await runGit(dir, ['add', '--', ...abs])
+    const res = await runGitPaths(dir, ['add'], abs)
     return res.code === 0 ? { ok: true as const } : { ok: false as const, message: res.stderr.trim() }
   })
 
@@ -676,8 +707,8 @@ export function registerGitIpc(): void {
     const head = await runGit(dir, ['rev-parse', '--verify', 'HEAD'])
     const res =
       head.code === 0
-        ? await runGit(dir, ['reset', '-q', 'HEAD', '--', ...abs])
-        : await runGit(dir, ['rm', '--cached', '-q', '--', ...abs])
+        ? await runGitPaths(dir, ['reset', '-q', 'HEAD'], abs)
+        : await runGitPaths(dir, ['rm', '--cached', '-q'], abs)
     return res.code === 0 ? { ok: true as const } : { ok: false as const, message: res.stderr.trim() }
   })
 
@@ -688,7 +719,7 @@ export function registerGitIpc(): void {
       assertInside(dir)
       const tracked = await safeAbsPaths(trackedPaths)
       const untracked = await safeAbsPaths(untrackedPaths)
-      if (tracked.length) await runGit(dir, ['checkout', 'HEAD', '--', ...tracked])
+      if (tracked.length) await runGitPaths(dir, ['checkout', 'HEAD'], tracked)
       for (const p of untracked) {
         await fs.rm(p, { force: true }).catch(() => {})
       }
