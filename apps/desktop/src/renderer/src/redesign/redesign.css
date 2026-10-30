@@ -443,6 +443,8 @@ body.cf-resizing-y * {
 /* 顶部：搜索占满一行，消息 / 角色 tab 再并排「新建对话」/「添加」图标。
    整行兼作左栏的窗口拖拽把手（补上非对话界面缺失的顶部拖拽区）；其中的交互控件另置 no-drag。 */
 .cf-rail__top {
+  /* 筛选面板按这一行定位 */
+  position: relative;
   padding: var(--space-3);
   display: flex;
   align-items: center;
@@ -501,6 +503,145 @@ body.cf-resizing-y * {
 .cf-search__clear:hover {
   background: var(--bg-hover);
   color: var(--fg);
+}
+/* 消息 tab：最左是筛选按钮（代替放大镜），选了条件后换成已选的角色头像堆叠与文件夹，再是输入框。
+   输入文字起点与其他搜索框（放大镜样式）对齐：2 + 26 + 6 = 12 + 14 + 8 = 34px */
+.cf-search--filter {
+  padding-left: 2px;
+  gap: 6px;
+}
+.cf-search__filter,
+.cf-search__tokens {
+  flex: none;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.cf-search__filter {
+  width: 26px;
+  justify-content: center;
+  padding: 0;
+  color: var(--fg-subtle);
+}
+.cf-search__filter:hover,
+.cf-search__filter[aria-expanded='true'] {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+/* 至少与筛选按钮同宽、内容居中：只有一个头像或一个文件夹时占位与筛选按钮相同，输入文字不左右移 */
+.cf-search__tokens {
+  min-width: 26px;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 3px;
+  color: var(--fg-muted);
+}
+.cf-search__tokens:hover {
+  background: var(--bg-hover);
+}
+.cf-search .cf-avstack {
+  --ring: var(--bg);
+}
+.cf-search__folder {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+/* 多个文件夹：图标右上角标数字（同头像堆叠的「+N」：主题色实底反白），右侧留出角标的位置 */
+.cf-search__folder.has-badge {
+  margin-right: 6px;
+}
+.cf-search__badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+/* 筛选面板：外观沿用统一下拉框的浮层（.select-menu），改为贴在搜索行下方、与列表等宽 */
+.cf-filter.select-menu {
+  position: absolute;
+  top: calc(100% - var(--space-3) + 6px);
+  left: var(--space-3);
+  right: var(--space-3);
+  z-index: 50;
+  max-height: min(420px, 60vh);
+  -webkit-app-region: no-drag;
+  animation: cf-addmenu-pop 0.14s ease;
+}
+.cf-filter__opt {
+  width: 100%;
+  /* 相邻两个选中项的底色之间留 1px 缝（上下外边距折叠），不连成一块 */
+  margin: 1px 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+.cf-filter__opt:hover {
+  background: var(--bg-hover);
+}
+/* 选中：浅主题色底（同对话列表的当前行）、名字加粗、数字与文件夹图标转主题色；悬停在底色上再叠一层悬停色 */
+.cf-filter__opt.is-on {
+  background: var(--bg-selected);
+}
+.cf-filter__opt.is-on:hover {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-selected);
+}
+.cf-filter__opt.is-on .select-menu__name {
+  font-weight: 600;
+}
+.cf-filter__opt.is-on .cf-filter__count,
+.cf-filter__opt.is-on .cf-filter__icon {
+  color: var(--accent);
+}
+.cf-filter__opt .select-ava {
+  width: 22px;
+  height: 22px;
+}
+.cf-filter__icon {
+  flex: none;
+  width: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-subtle);
+}
+.cf-filter__hint {
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.cf-filter__count {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+/* 在另一类条件下没有对话：置灰，仍可点 */
+.cf-filter__opt.is-dim .select-menu__name {
+  color: var(--fg-subtle);
+}
+.cf-filter__opt.is-dim .select-ava {
+  opacity: 0.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-filter.select-menu {
+    animation: none;
+  }
 }
 
 /* 列表区（消息或角色共用滚动容器） */
@@ -2271,6 +2412,19 @@ body.cf-resizing-y * {
   color: var(--fg-subtle);
   font-size: 12px;
   line-height: 1.8;
+}
+.cf-empty__action {
+  display: block;
+  margin: 2px auto 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cf-empty__action:hover {
+  text-decoration: underline;
 }
 
 /* ---------------------------- 中列：快速开启（无任何对话时） ---------------------------- */
@@ -4182,7 +4336,7 @@ a.bots-btn {
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
-/* 头像堆叠（扩展列表行尾、可用角色下拉框）：后一个压前一个 6px，描边取所在底色 */
+/* 头像堆叠（扩展列表行尾、可用角色下拉框、对话搜索框）：后一个压前一个 6px，描边取所在底色 */
 .cf-avstack {
   --sz: 20px;
   --ring: var(--bg-elevated);
@@ -4190,8 +4344,8 @@ a.bots-btn {
   align-items: center;
   flex: none;
 }
-.cf-avstack__ava,
-.cf-avstack__more {
+.cf-avstack__ava {
+  position: relative;
   width: var(--sz);
   height: var(--sz);
   border-radius: 50%;
@@ -4199,8 +4353,7 @@ a.bots-btn {
   background: var(--bg-inset);
   box-shadow: 0 0 0 2px var(--ring);
 }
-.cf-avstack__ava + .cf-avstack__ava,
-.cf-avstack__ava + .cf-avstack__more {
+.cf-avstack__ava + .cf-avstack__ava {
   margin-left: -6px;
 }
 .cf-avstack__ava > svg,
@@ -4214,19 +4367,21 @@ a.bots-btn {
 .cf-setrow .cf-avstack {
   --ring: var(--bg-panel);
 }
-/* 「+N」：主题色实底反白；两位数放不下时横向撑成胶囊，一位数仍是圆 */
-.cf-avstack__more {
-  width: auto;
-  min-width: var(--sz);
-  padding: 0 3px;
-  border-radius: 999px;
+/* 超出时末位头像盖一层半透明深色、写白色 +N（不用主题色，任何头像颜色上都看得清）；两位数缩小字号 */
+.cf-avstack__veil {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 9.5px;
   font-weight: 600;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+}
+.cf-avstack__veil.is-wide {
+  font-size: 8px;
 }
 
 .cf-modal.bots-pickmodal {
