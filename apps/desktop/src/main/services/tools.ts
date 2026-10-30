@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
 import { existsSync, promises as fs, type Dirent } from 'fs'
 import { homedir } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
+import ignore, { type Ignore } from 'ignore'
 import { resolveExecShell } from './exec-policy'
 import { skillsDir, upsertSkill } from './skills'
 import {
@@ -75,7 +76,7 @@ export const toolSpecs: ToolSpec[] = [
   {
     name: 'grep',
     description:
-      '在工作区内按正则搜索文件内容，返回匹配行（格式 路径:行号: 内容）。可选 glob 限定文件范围（如 *.ts）、ignore_case 忽略大小写。默认忽略 node_modules/.git/dist 等目录，跳过二进制与超大文件。用于快速定位代码。',
+      '在工作区内按正则搜索文件内容，返回匹配行（格式 路径:行号: 内容）。可选 glob 限定文件范围（如 *.ts）、ignore_case 忽略大小写。默认忽略 node_modules/.git/dist 等目录及 .gitignore 忽略的文件（path 直接指向被忽略的目录时照常搜索），跳过二进制与超大文件。用于快速定位代码。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -626,6 +627,8 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 const WALK_MAX = 20_000
 const GLOB_RESULT_MAX = 500
 const GREP_MATCH_MAX = 200
+/** grep 同时读取的文件数。 */
+const GREP_CONCURRENCY = 16
 /** web_fetch 护栏：请求超时 / 下载字节上限 / 返回文本字符上限。 */
 const WEB_FETCH_TIMEOUT_MS = 30_000
 const WEB_FETCH_MAX_BYTES = 5 * 1024 * 1024
@@ -881,30 +884,110 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp('^' + re + '$')
 }
 
-/** 递归收集受信根内的文件（相对 posix 路径），跳过噪音目录；至多 WALK_MAX 个。 */
-async function collectFiles(root: string): Promise<{ abs: string; rel: string }[]> {
-  const out: { abs: string; rel: string }[] = []
-  async function walk(dir: string, rel: string): Promise<void> {
-    if (out.length >= WALK_MAX) return
+/** 一层 .gitignore：规则相对其所在目录 base 匹配。 */
+interface IgnoreLayer {
+  base: string
+  ig: Ignore
+}
+
+async function loadIgnoreLayer(dir: string): Promise<IgnoreLayer | null> {
+  try {
+    return { base: dir, ig: ignore().add(await fs.readFile(join(dir, '.gitignore'), 'utf8')) }
+  } catch {
+    return null
+  }
+}
+
+/** 按 git 的叠加语义判定：由浅到深逐层套用，深层的命中（含 ! 反选）覆盖浅层。 */
+function isIgnoredBy(layers: IgnoreLayer[], abs: string, isDir: boolean): boolean {
+  let ignored = false
+  for (const l of layers) {
+    const rel = relative(l.base, abs).split(sep).join('/') + (isDir ? '/' : '')
+    const r = l.ig.test(rel)
+    if (r.ignored) ignored = true
+    else if (r.unignored) ignored = false
+  }
+  return ignored
+}
+
+/**
+ * dir 的祖先目录（仓库根 → dir 的父目录）上的 .gitignore 层：从子目录开始搜也要遵守上层规则。
+ * dir 不在 git 仓库内则为空：上溯不越过仓库根，免得套用无关上层目录（如用户主目录）里的 .gitignore。
+ */
+async function ancestorIgnoreLayers(dir: string): Promise<IgnoreLayer[]> {
+  const exists = (p: string): Promise<boolean> =>
+    fs.stat(p).then(
+      () => true,
+      () => false
+    )
+  const chain: string[] = []
+  let cur = resolve(dir)
+  let inRepo = await exists(join(cur, '.git'))
+  while (!inRepo) {
+    const parent = dirname(cur)
+    if (parent === cur) return []
+    cur = parent
+    chain.unshift(cur)
+    inRepo = await exists(join(cur, '.git'))
+  }
+  const layers = await Promise.all(chain.map(loadIgnoreLayer))
+  return layers.filter((l): l is IgnoreLayer => l !== null)
+}
+
+/**
+ * 逐个产出受信根内的文件（相对 posix 路径），跳过噪音目录；至多 WALK_MAX 个。
+ * 边走边产出：调用方够数即可停下，不必先走完整棵树。
+ * gitignore=true 时遵守搜索根及其下各层的 .gitignore，在 git 仓库内还套用上层目录（至仓库根）的；
+ * 与 ripgrep 不同，不在仓库内也读（如下载解压的源码包）。显式指定的搜索根本身被上层忽略时（如直接搜
+ * build/）不套上层规则，照常搜索——那是用户 / 模型明确要看的地方。
+ */
+async function* walkFiles(
+  root: string,
+  gitignore = false
+): AsyncGenerator<{ abs: string; rel: string }> {
+  let count = 0
+  let base: IgnoreLayer[] = []
+  if (gitignore) {
+    base = await ancestorIgnoreLayers(root)
+    if (isIgnoredBy(base, root, true)) base = []
+  }
+  async function* walk(
+    dir: string,
+    rel: string,
+    layers: IgnoreLayer[]
+  ): AsyncGenerator<{ abs: string; rel: string }> {
     let entries: Dirent[]
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
     } catch {
       return
     }
+    if (gitignore) {
+      const own = await loadIgnoreLayer(dir)
+      if (own) layers = [...layers, own]
+    }
     for (const e of entries) {
-      if (out.length >= WALK_MAX) return
+      if (count >= WALK_MAX) return
       const childAbs = join(dir, e.name)
       const childRel = rel ? `${rel}/${e.name}` : e.name
       if (e.isDirectory()) {
         if (IGNORE_DIRS.has(e.name)) continue
-        await walk(childAbs, childRel)
+        if (layers.length && isIgnoredBy(layers, childAbs, true)) continue
+        yield* walk(childAbs, childRel, layers)
       } else if (e.isFile()) {
-        out.push({ abs: childAbs, rel: childRel })
+        if (layers.length && isIgnoredBy(layers, childAbs, false)) continue
+        count++
+        yield { abs: childAbs, rel: childRel }
       }
     }
   }
-  await walk(root, '')
+  yield* walk(root, '', base)
+}
+
+/** 一次收齐 walkFiles 的结果（glob 要按修改时间排序，须先拿到全部）。 */
+async function collectFiles(root: string): Promise<{ abs: string; rel: string }[]> {
+  const out: { abs: string; rel: string }[] = []
+  for await (const f of walkFiles(root)) out.push(f)
   return out
 }
 
@@ -1430,32 +1513,54 @@ export async function executeTool(
       } catch {
         return { content: `路径不存在：${String(a.path ?? '.')}`, summary: '路径不存在', isError: true }
       }
+      // 遍历遵守 .gitignore（同 ripgrep / Claude Code 的 Grep）：大项目里被忽略的构建产物、缓存目录动辄上万个
+      // 文件，不跳过的话既慢，还会占满 WALK_MAX 名额，让后面的源码目录根本扫不到。
       const files = st.isFile()
         ? [{ abs: target, rel: basename(target) }]
-        : await collectFiles(target)
-      const rows: string[] = []
-      let truncated = false
-      outer: for (const f of files) {
-        if (globRe && !globRe.test(globBase ? basename(f.rel) : f.rel)) continue
+        : walkFiles(target, true)
+      // 单个文件的匹配行（至多 GREP_MATCH_MAX 条，总数由下面汇总时截断）。
+      const searchFile = async (f: { abs: string }): Promise<string[]> => {
         let buf: Buffer
         try {
           buf = await fs.readFile(f.abs)
         } catch {
-          continue
+          return []
         }
-        if (buf.length > MAX_READ_BYTES || looksBinary(buf)) continue
+        if (buf.length > MAX_READ_BYTES || looksBinary(buf)) return []
         // 与 read_file 一致的行拆分：\r 不残留在行内，正则锚点 ^/$ 与显示都基于同一「干净行」。
         const lines = buf.toString('utf8').split(/\r\n|\r|\n/)
-        for (let i = 0; i < lines.length; i++) {
-          if (re.test(lines[i])) {
-            rows.push(`${displayPath(ctx.workspaceRoot, f.abs)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
+        const hits: string[] = []
+        for (let i = 0; i < lines.length && hits.length < GREP_MATCH_MAX; i++) {
+          if (re.test(lines[i]))
+            hits.push(`${displayPath(ctx.workspaceRoot, f.abs)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
+        }
+        return hits
+      }
+      // 按遍历顺序分批并发读取，结果仍按遍历顺序汇总（输出稳定）；凑满上限即停止遍历。
+      const rows: string[] = []
+      let truncated = false
+      let batch: { abs: string }[] = []
+      const flush = async (): Promise<void> => {
+        const results = await Promise.all(batch.map(searchFile))
+        batch = []
+        for (const hits of results)
+          for (const row of hits) {
+            rows.push(row)
             if (rows.length >= GREP_MATCH_MAX) {
               truncated = true
-              break outer
+              return
             }
           }
+      }
+      for await (const f of files) {
+        if (globRe && !globRe.test(globBase ? basename(f.rel) : f.rel)) continue
+        batch.push(f)
+        if (batch.length >= GREP_CONCURRENCY) {
+          await flush()
+          if (truncated) break
         }
       }
+      if (!truncated && batch.length) await flush()
       return {
         content:
           (note ? `${note}\n` : '') +
